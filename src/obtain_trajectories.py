@@ -114,42 +114,6 @@ def objects_in_scene():
 
 
 
-class query_trajectories():
-
-    def __init__(self):
-        self.traj_poses = dict()
-        host = rospy.get_param("mongodb_host")
-        port = rospy.get_param("mongodb_port")
-        self._client = pymongo.MongoClient(host, port)
-        self._retrieve_logs()
-
-    def _retrieve_logs(self):
-        logs = self._client.message_store.people_perception.find()   # Need the Trajectory database in here
-
-        for log in logs:
-            #print "log: " + repr(log)
-            for i, uuid in enumerate(log['uuid']):
-                print "uuid: " + repr(uuid)
-                print "log pos: " + repr(log['pose'])
-                print "log time: " + repr(log['start_time']) + ",  "  + repr(log['end_time'])
-                print "header: " + repr(log['header']['stamp'])
-
-                if uuid not in self.traj_poses:
-                    self.traj_poses[uuid] = log['trajectory']
-                else:
-                   print "SAME ID Twice in Mongodb"
-        return
-
-    def check(self):
-        cnt = 0
-        for uuid, poses in self.items():
-            if cnt == 0:
-                print "example trajectory:"
-                print uuid, poses
-            cnt+=1
-
-        print repr(cnt) + ' Trajectories Loaded'
-
 
 
 class QueryClient():
@@ -171,16 +135,10 @@ class QueryClient():
 
 
 
-
-
-
 def pickle_load_trajectories(traj_dir, pickle_file):
     trajectories = pickle.load(open(os.path.join(traj_dir, pickle_file)))
     traj_poses = {}
     for uuid, traj in trajectories.items():
-        #print uuid, traj
-        #print type(traj.pose)
-        #print type(traj.pose[0])
 
         traj_poses[uuid] = []
         for pose in traj.pose:
@@ -190,6 +148,8 @@ def pickle_load_trajectories(traj_dir, pickle_file):
             traj_poses[uuid].append((x,y,z))
         #print repr(len(traj_xy[uuid])) + " poses in trajectory"
     return traj_poses
+
+
 
 def check_traj(traj_poses):
     cnt = 0
@@ -202,8 +162,7 @@ def check_traj(traj_poses):
 
 
 
-
-def get_trajectories(load_method = 'pickle', traj_dir=None, pickle_file=None):
+def get_trajectories(load_method, traj_dir=None, pickle_file=None):
 
     if load_method == 'pickle':
         traj_poses = pickle_load_trajectories(traj_dir, pickle_file)
@@ -221,7 +180,17 @@ def get_trajectories(load_method = 'pickle', traj_dir=None, pickle_file=None):
         logger.info("Result: %s trajectories" % len(res.trajectories.trajectories))   
         print "num traj returned = " + repr(len(res.trajectories.trajectories))
 
-        return res.trajectories.trajectories
+        trajectory_poses={}
+        for trajectory in res.trajectories.trajectories:
+            trajectory_poses[trajectory.uuid] = []
+                
+            for entry in trajectory.trajectory:
+                x=entry.pose.position.x
+                y=entry.pose.position.y
+                z=entry.pose.position.z
+                trajectory_poses[trajectory.uuid].append((x,y,z))
+
+        return trajectory_poses
 
 
 
@@ -249,14 +218,15 @@ def select_landmark_poses(input_data):
 
 
 
+
 class Landmarks():
 
     def __init__(self, poses):
         rospy.init_node("simple_marker")
         # create an interactive marker server on the topic namespace simple_marker
         self._server = InteractiveMarkerServer("simple_marker")
-
-        self.poses_landmarks = poses
+        self.poses = poses
+        self.poses_landmarks = {}
         self.visualize_landmarks()
       
 
@@ -264,13 +234,14 @@ class Landmarks():
     def visualize_landmarks(self):
         """Create an interactive marker per landmark"""
 
-        for i, pose in enumerate(self.poses_landmarks):
+        for i, pose in enumerate(self.poses):
             name = "landmark_" + repr(i)
+            self.poses_landmarks[name] = pose
             int_marker = self.create_marker(pose, name)
 
         
     def create_marker(self, pose, name, interactive=False):
-        print name, pose
+        #print name, pose
         (x,y,z) = pose
 
         # create an interactive marker for our server
@@ -328,6 +299,16 @@ class Landmarks():
 
 
 
+
+
+
+
+
+
+
+
+
+
 if __name__ == "__main__":
     global __out
     __out = True
@@ -339,8 +320,6 @@ if __name__ == "__main__":
 
     """NEED TO QUERY REGIONS OF INTEREST!!! """
     soma_rois = ['ROI_1']
-
-
 
 
     """TRAJECTORIES"""
@@ -392,5 +371,8 @@ if __name__ == "__main__":
     print "landmarks = " + repr(landmarks)
 
     pins = Landmarks(landmarks)
+
+
+
 
     rospy.spin()  

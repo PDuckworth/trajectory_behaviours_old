@@ -26,8 +26,7 @@ from qsrlib_io.world_trace import Object_State, World_Trace
 from qsrlib_ros.qsrlib_ros_client import QSRlib_ROS_Client
 
 from query_examples import get_query
-from obtain_trajectories import *
-
+import obtain_trajectories as ot
 
 # create logger with 'spam_application'
 logger = logging.getLogger('traj_learner')
@@ -360,20 +359,29 @@ if __name__ == "__main__":
     #**************************************************************#
 
     if '1' in sections_dic:
-        __out = True
+        __out = False
         logger.info('1. Loading Objects and Trajectory Data')
         traj_dir = os.path.join(base_data_dir, 'trajectory_dump')
 
         #regions_of_interest = get_soma_roi()
 
-
-        objects = objects_in_scene()
+        objects = ot.objects_in_scene()
         if __out: objects.check() 
    
         #traj_poses = get_trajectories('pickle', traj_dir, 'reduced_traj.p')
-        traj_poses = get_trajectories('mongo', traj_dir)
-        if __out: check_traj(traj_poses) 
+        trajectory_poses = ot.get_trajectories('mongo', traj_dir)
+        if __out: ot.check_traj(trajectory_poses) 
     
+        all_poses = list(itertools.chain.from_iterable(trajectory_poses.values()))
+        print "number of poses in total = " +repr(len(all_poses))
+        landmarks = ot.select_landmark_poses(all_poses)
+     
+        pins = ot.Landmarks(landmarks)
+        print "landmarks = " + repr(landmarks)
+        print ""
+        print pins.poses_landmarks
+
+
 
     #**************************************************************#
     #          Apply QSR Lib to Objects and Trajectories           #
@@ -454,7 +462,7 @@ if __name__ == "__main__":
         print "\nNOW LEARN...\n"
 
     
-
+    rospy.spin()
 
 
 
