@@ -11,7 +11,7 @@ import os, sys, time
 import logging
 import argparse
 import itertools
-#from itertools import combinations
+import getpass
 
 import numpy as np
 import pyrr
@@ -47,7 +47,6 @@ ch.setFormatter(formatter)
 logger.addHandler(fh)
 logger.addHandler(ch)
 
-
 #**************************************************************#
 #        Implement QSR Lib on objects and trajectories         #
 #**************************************************************#
@@ -59,7 +58,7 @@ options = {"rcc3": "rcc3_rectangle_bounding_boxes_2d",
            "rcc3a": "rcc3_rectangle_bounding_boxes_2d"}
 
 
-def get_qsrlib_world(uuid, poses, objects, params):
+def get_qsrlib_world(uuid, objects, poses, params):
     (qsr, _q,v,n) =  params
 
     #convert q from string to float
@@ -76,24 +75,21 @@ def get_qsrlib_world(uuid, poses, objects, params):
         worlds[key] = World_Trace()
 
     for frame, (x,y,z) in enumerate(poses):
-        if __out:
-            print "Frame # " + repr(frame)
-            print "   added pose to o1"
-        o1.append(Object_State(name="traj", timestamp = frame, x=x, y=y, \
+        if __out: print "Frame # " + repr(frame)
+
+        o1.append(Object_State(name="trajectory", timestamp = frame, x=x, y=y, \
                 quantisation_factor=q, validate=v, no_collapse=n))
-    
+        if __out: print "   added trajectory pose" + repr(frame) + " to o1."
+
         for obj in objects:            
-            (x,y,z) = objects[obj][0]
+            (x,y,z) = objects[obj]
             if __out: print "   added object = " + repr(obj) + "  to o2"
 
             o2_dic[obj].append(Object_State(name=obj, timestamp = frame, x=x, y=y, \
                 quantisation_factor=q, validate=v, no_collapse=n))
-    if __out:
-        print "   Number of Object 1 poses: " + repr(len(o1))
-        print "   Object 2 dictionary: " + repr(o2_dic.keys())
-
-        print "number of traj poses= " + repr(len(o1))
-        print "paired with objects: " + repr(o2_dic.keys())
+    
+        if __out: print "number of traj poses= " + repr(len(o1))
+        if __out: print "paired with objects: " + repr(o2_dic.keys())
     
     for obj, o2 in o2_dic.items():
         worlds[(uuid, obj)].add_object_state_series(o1)
@@ -101,20 +97,23 @@ def get_qsrlib_world(uuid, poses, objects, params):
     return worlds
 
 
-def apply_qsr_lib(objects, trajectories, params, qsr_file):
+def apply_qsr_lib(objects_per_trajectory, trajectories, params, qsr_file):
     "Formats the object and trajectories and passes to qsrlib"
 
     spatial_relations = {}
     which_qsr = options[params[0]]
-    if __out: print "which qsr: " + repr(which_qsr)
-    if __out: print "with params: " + repr(params)
+    if __out: print "Qsr: " + repr(which_qsr)
+    if __out: print "With params: " + repr(params)
 
-    client_node = rospy.init_node("qsr_lib_ros_client")    
+    #client_node = rospy.init_node("qsr_lib_ros_client")    
 
-    for uuid, poses in traj_poses.items():
-        
+    for uuid, poses in trajectories.items():
+        objects = objects_per_trajectory[uuid]
+
         if __out: print repr(uuid) + ",  #poses = " + repr(len(poses))
-        worlds = gnerate_graphet_qsrlib_world(uuid, poses, objects.all_objects, params)
+        if __out: print "object file: " + repr(objects)
+
+        worlds = get_qsrlib_world(uuid, objects, poses, params)
         spatial_relations[uuid] = {}
 
         for (uuid, obj), world in worlds.items():
@@ -132,7 +131,7 @@ def apply_qsr_lib(objects, trajectories, params, qsr_file):
                 
                 relations = str(out.qsrs.trace[t].qsrs.values()[0].qsr)
                 spatial_relations[uuid][t][(uuid, obj)] = relations
-                #print spatial_relations[t][(uuid, obj)]
+                #print spatial_relations[uuid][t][(uuid, obj)]
 
     #spatial_relations is a list of dictionaries. One per Trajectory, key=(uuid,objs). values=poses.
     pickle.dump(spatial_relations, open(qsr_file, 'w'))
@@ -144,12 +143,12 @@ def apply_qsr_lib(objects, trajectories, params, qsr_file):
 #     Compute Episode Representation of the Spatial Relations  #
 #**************************************************************#
 
-def generate_episode_data(spatial_relations, output_file):
+def generate_episode_data(spatial_relations, output_file, noise_thres=3):
     from data_processing_utils import  compute_episodes, filter_intervals
 
     cnt=0
     all_episodes = {}
-    NOISE_THRESHOLD = 2
+    NOISE_THRESHOLD = noise_thres
 
     for uuid in spatial_relations:
         key, epi  = compute_episodes(spatial_relations[uuid], cnt, __out)
@@ -191,11 +190,10 @@ def generate_graph_data(episodes, data_dir, params):
         episodes_list = list(itertools.chain.from_iterable(episodes_dict.values()))
 
         activity_graphs[episodes_file] = Activity_Graph(episodes_list, params)
-                
         activity_graphs[episodes_file].get_valid_graphlets()
 
                 
-        if cnt == 1:
+        if __out and cnt == 1:
             activity_graphs[episodes_file].graph2dot('/tmp/act_ntc.dot', False)
             print "episode file 1: " +repr(episodes_file)
             print activity_graphs[episodes_file].graph
@@ -273,7 +271,7 @@ def check_dir(directory):
     return
 
 
-def qsr_setup(data_dir, params):
+def qsr_setup(data_dir, params, date):
     params_tag = map(str, params)
     params_tag = '__'.join(params_tag)
     qsr_tag = params_tag + date
@@ -284,19 +282,16 @@ def qsr_setup(data_dir, params):
 
 
 def AG_setup(my_data, date):
-
     params_str = (my_data['MIN_ROWS'], my_data['MAX_ROWS'], my_data['MAX_EPI'], my_data['num_cores'])#
     params = []
     for x in params_str:
         params.append(int(x)) if x != 'None' else params.append(None)
-    if __out: print params
 
     params_tag = map(str, params)
     params_tag = '_'.join(params_tag)
     tag = params_tag + date
-    if __out: print tag
-    return params, tag
 
+    return params, tag
 
 
 
@@ -306,6 +301,8 @@ def AG_setup(my_data, date):
 
 if __name__ == "__main__":
     global __out
+    rospy.init_node("trajectory_learner")
+
     parser = argparse.ArgumentParser()
     parser.add_argument("sections", help="chose what section of code to run", type=str)
     args = parser.parse_args()
@@ -316,7 +313,6 @@ if __name__ == "__main__":
                    '4': "Activity Graphs/Graphlets",
                    '5': "Generate Code Book and Histograms",
                    '6': "Learn unsupervised behaviours"}
-
 
     sections = args.sections
     sections_dic={}
@@ -340,8 +336,9 @@ if __name__ == "__main__":
             print "Selected: " + repr(key) + ". Running: " + repr(sections_dic[key])
         print "************************************************"
         sys.exit(1)
-
-    base_data_dir = '/home/strands/STRANDS/'
+    
+    user = getpass.getuser()
+    base_data_dir = os.path.join('/home/' + user + '/STRANDS/')
     options_file = os.path.join(base_data_dir + 'options.txt')
 
     my_data = {}
@@ -357,81 +354,91 @@ if __name__ == "__main__":
     #**************************************************************#
     #             Obtain Objects and Trajectories                  #
     #**************************************************************#
-
+    __out = False
     if '1' in sections_dic:
-        __out = False
+        
         logger.info('1. Loading Objects and Trajectory Data')
         traj_dir = os.path.join(base_data_dir, 'trajectory_dump')
 
         #regions_of_interest = get_soma_roi()
 
         objects = ot.objects_in_scene()
-        if __out: objects.check() 
+        if __out: objects.check()
    
         #traj_poses = get_trajectories('pickle', traj_dir, 'reduced_traj.p')
         trajectory_poses = ot.get_trajectories('mongo', traj_dir)
         if __out: ot.check_traj(trajectory_poses) 
     
         all_poses = list(itertools.chain.from_iterable(trajectory_poses.values()))
-        print "number of poses in total = " +repr(len(all_poses))
+        if __out: print "number of poses in total = " +repr(len(all_poses))
         landmarks = ot.select_landmark_poses(all_poses)
      
         pins = ot.Landmarks(landmarks)
-        print "landmarks = " + repr(landmarks)
-        print ""
-        print pins.poses_landmarks
+        if __out: print "landmark poses = " + repr(landmarks)
+        if __out: print pins.poses_landmarks
 
+        """TO PLAY WITH LANDMARKS INSTEAD OF OBJECTS"""
+        static_things = objects.all_objects
+        static_things = pins.poses_landmarks
 
+        if __out: print "objects: " + repr(static_things)
+
+        #Find Euclidean distance between each trajectory and the landmarks or objects :)
+        objects_per_trajectory = ot.trajectory_object_dist(static_things, trajectory_poses)
+        if __out: print objects_per_trajectory['7d638405-b2f8-55ce-b593-efa8e3f2ff2e']
 
     #**************************************************************#
     #          Apply QSR Lib to Objects and Trajectories           #
     #**************************************************************#
     #Dependant on Objects and Trajectories  
+    __out = False
     if '2' in sections_dic:
-        __out = False
+        
         logger.info('2. Apply QSR Lib')
-        qsr_dir, qsr_tag = qsr_setup(base_data_dir, qsr_params)
+        qsr_dir, qsr_tag = qsr_setup(base_data_dir, qsr_params, date)
         qsr_out_file = os.path.join(qsr_dir + 'all_qsrs__' + qsr_tag + '.p')
         if __out: print qsr_out_file        
+
+
         try:
-            spatial_relations = apply_qsr_lib(objects, traj_poses, qsr_params, qsr_out_file)
+            spatial_relations = apply_qsr_lib(objects_per_trajectory, trajectory_poses, qsr_params, qsr_out_file)
         except NameError:
-            print "2: 'Apply QSR Lib' needs Data. One of either: objects, trajectories, or parameters was not loaded."
+            print "2: 'Apply QSR Lib' needs Data. One of either: objects, trajectories, or parameters was not loaded correctly."
             if '1' not in sections_dic: print "Try re-running with arg = '1'\n"
 
-
-
+    
     #**************************************************************#
     #             Generate Episodes from QSR Data                  #
     #**************************************************************#
     #Dependant on QSRs
-    if '3' in sections_dic and '2' not in sections_dic:
-        __out = False
+    __out = False
+    if '3' in sections_dic and '2' not in sections_dic:    
         logger.info('3. Loading QSR Data from Pickle File')
-        qsr_dir, qsr_tag = qsr_setup(base_data_dir, qsr_params)
+        qsr_dir, qsr_tag = qsr_setup(base_data_dir, qsr_params, date)
         qsr_out_file = os.path.join(qsr_dir + 'all_qsrs__' + qsr_tag + '.p')
         spatial_relations = pickle.load(open(qsr_out_file))
         if __out: print len(spatial_relations)
 
     if '3' in sections_dic:
-        qsr_dir, qsr_tag = qsr_setup(base_data_dir, qsr_params)
+        noise_threshold = 3
+        qsr_dir, qsr_tag = qsr_setup(base_data_dir, qsr_params, date)
         epi_output_file = os.path.join(qsr_dir + 'episodes__' + qsr_tag + '.p')
-        all_episodes = generate_episode_data(spatial_relations, epi_output_file)
-        if  __out: print "number of episodes = " + repr(len(all_episodes))
+        all_episodes = generate_episode_data(spatial_relations, epi_output_file, noise_threshold)
+        if  __out: print "number of episode lists = " + repr(len(all_episodes))
 
 
     #**************************************************************#
     #            Activity Graphs/Code_book/Histograms              #
     #**************************************************************#
     #Dependant on Episodes
+    __out = False
     if '4' in sections_dic and '3' not in sections_dic:
-        __out = False
-        qsr_dir, qsr_tag = qsr_setup(base_data_dir, qsr_params)
+        
+        qsr_dir, qsr_tag = qsr_setup(base_data_dir, qsr_params, date)
         all_episodes = pickle.load(open(os.path.join(qsr_dir + 'episodes__' + qsr_tag + '.p')))
         if  __out: print "number of episodes loaded = " + repr(len(all_episodes))
 
     if '4' in sections_dic:
-        
         params, tag = AG_setup(my_data, date)
         activity_graph_dir = os.path.join(base_data_dir, 'AG_graphs/')
         check_dir(activity_graph_dir)
@@ -443,8 +450,8 @@ if __name__ == "__main__":
     #**************************************************************#
     #           Generate Feature Space from Histograms             #
     #**************************************************************#     
+    __out = False
     if '5' in sections_dic:
-        __out = False
         params, tag = AG_setup(my_data, date)
         activity_graph_dir = os.path.join(base_data_dir, 'AG_graphs/')
         if __out: print activity_graph_dir 
@@ -452,8 +459,8 @@ if __name__ == "__main__":
 
 
     """LEARN SOMETHING """ 
-    if '6' in sections_dic and '5' not in sections_dic:
-        __out = False
+    __out = False
+    if '6' in sections_dic and '5' not in sections_dic:       
         logger.info('6. Unsupervised Learning on Feature Space')
         learning_area = os.path.join(base_data_dir, 'relational_learner')
         check_dir(learning_area)
@@ -461,7 +468,8 @@ if __name__ == "__main__":
 
         print "\nNOW LEARN...\n"
 
-    
+    print ""
+    logger.info('Running rospy.spin()')
     rospy.spin()
 
 

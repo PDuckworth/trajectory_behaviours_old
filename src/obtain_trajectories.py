@@ -14,6 +14,7 @@ import itertools
 import numpy as np
 import cPickle as pickle
 import random
+from scipy import spatial
 from interactive_markers.interactive_marker_server import *
 from visualization_msgs.msg import *
 from geometry_msgs.msg import Point
@@ -95,17 +96,17 @@ class query_objects():
                 #print obj_instance
 
                 if _id not in self.all_objects:
-                    self.all_objects[obj_instance] = [(x,y,z)]
+                    self.all_objects[obj_instance] = (x,y,z)
                 else:
-                    self.all_objects[obj_instance] = [(x,y,z)]
+                    self.all_objects[obj_instance] = (x,y,z)
         return
 
 
     def check(self):
         print 'All objects in SOMA:'
-        for i, object in enumerate(self.all_objects):
-            print repr(i) + ",  " + repr(object) + ",  " + repr(self.all_objects[object]) 
-        print 'All objects Loaded\n'
+        for i, key in enumerate(self.all_objects):
+            print repr(i) + ",  " + repr(key) + ",  " + repr(self.all_objects[key]) 
+        print repr(len(self.all_objects)) + ' objects Loaded.\n'
 
 
 def objects_in_scene():
@@ -156,7 +157,7 @@ def check_traj(traj_poses):
     for uuid, poses in traj_poses.items():
         if cnt == 0:
             print "example trajectory:"
-            print "  " + repr(uuid) + ",  " + repr(poses)
+            print "  " + repr(uuid) + ",  " + repr(poses) + ". LENGTH = " +repr(len(poses))
         cnt+=1
     print repr(cnt) + ' Trajectories Loaded\n'
 
@@ -222,9 +223,9 @@ def select_landmark_poses(input_data):
 class Landmarks():
 
     def __init__(self, poses):
-        rospy.init_node("simple_marker")
-        # create an interactive marker server on the topic namespace simple_marker
-        self._server = InteractiveMarkerServer("simple_marker")
+
+        # create an interactive marker server on the topic namespace landmark_markers
+        self._server = InteractiveMarkerServer("landmark_markers")
         self.poses = poses
         self.poses_landmarks = {}
         self.visualize_landmarks()
@@ -235,7 +236,7 @@ class Landmarks():
         """Create an interactive marker per landmark"""
 
         for i, pose in enumerate(self.poses):
-            name = "landmark_" + repr(i)
+            name = "landmark" + repr(i)
             self.poses_landmarks[name] = pose
             int_marker = self.create_marker(pose, name)
 
@@ -300,79 +301,89 @@ class Landmarks():
 
 
 
+def trajectory_object_dist(objects, trajectory_poses):
+    uuids=trajectory_poses.keys()
+    object_ids=objects.keys()
 
+    print repr(len(uuids)) + " trajectories.  "+ repr(len(object_ids)) + " objects. Nearest 4 selected."
 
+    cnt=0
+    object_distances={}
+    distance_objects={}
+    for (uuid, obj) in itertools.product(uuids, object_ids):
+        #object_distances[(uuid, obj)] = [] #No need for list, if only taking init_pose
+        #print (uuid, obj)
 
+        #Just select the first trajectory pose for now :)
+        traj_init_pose = trajectory_poses[uuid][0]
+        object_pose = objects[obj] #Objects only have one pose
+        dist = spatial.distance.pdist([traj_init_pose, object_pose], 'euclidean')
 
+        if uuid not in object_distances:
+            object_distances[uuid] = {}
+            distance_objects[uuid]={}
 
+        object_distances[uuid][obj] = dist[0]
+        distance_objects[uuid][dist[0]]= obj
+        if len(object_distances[uuid]) != len(distance_objects[uuid]):
+            print "multiple objects exactly the same distance from trajectory: " + repr(uuid)
+            print "object: " + repr(obj)
+            sys.exit(1)
+        #print cnt
+        cnt+=1
+
+    cnt=0
+    closest_objects = {}
+    for uuid, dist_objs in distance_objects.items():
+        keys = dist_objs.keys()
+        keys.sort()
+
+        #select closest 4 objects or landmarks
+        closest_dists = keys[0:4]
+        closest_objects[uuid]={}
+        for dist in closest_dists:
+            #print dist, dist_objs[dist]
+            obj = dist_objs[dist]
+            closest_objects[uuid][obj] = objects[obj]
+        #print cnt
+        cnt+=1
+
+    return closest_objects
 
 
 
 
 if __name__ == "__main__":
     global __out
-    __out = True
+    __out = False
 
     base_data_dir = '/home/strands/STRANDS/'
     options_file = os.path.join(base_data_dir + 'options.txt')
     traj_dir = os.path.join(base_data_dir, 'trajectory_dump')
 
 
-    """NEED TO QUERY REGIONS OF INTEREST!!! """
-    soma_rois = ['ROI_1']
+    trajectory_poses = get_trajectories('mongo', traj_dir)
+    print "number of unique traj returned = " + repr(len(trajectory_poses))
 
-
-    """TRAJECTORIES"""
-    client = QueryClient()
-    query = get_query()
-    rospy.loginfo("Query: %s" % query )
-    start = time.time()
-    res = client.query(query, True)
-    print "time to query = " + repr(time.time() - start)
-
-    rospy.loginfo("Result: %s trajectories" % len(res.trajectories.trajectories))
-    rospy.loginfo("Type of first trajectory is: %s" % type(res.trajectories.trajectories[0]))
-    rospy.loginfo("Trajectory.trajectory[0]: %s" % (res.trajectories.trajectories[0].trajectory[0]))
-    
-    print "num traj returned = " + repr(len(res.trajectories.trajectories))
-    trajectory_poses={}
-
-    cnt=0
-    for roi in soma_rois:
-        trajectory_poses[roi] = {}
-
-        for trajectory in res.trajectories.trajectories:
-            trajectory_poses[roi][trajectory.uuid] = []
-                
-            for entry in trajectory.trajectory:
-                x=entry.pose.position.x
-                y=entry.pose.position.y
-                z=entry.pose.position.z
-                trajectory_poses[roi][trajectory.uuid].append((x,y,z))
-
-    print "number of unique traj returned = " + repr(len(trajectory_poses['ROI_1']))
-
-    raw_input("Press enter to continue")
-
-    #Need a method for querrying objects in ROI
-    #objects = objects_in_scene()
-    #if __out: objects.check()     
+    """Need a method for querrying objects in ROI"""
+    objects = objects_in_scene()
+    if __out: objects.check()     
 
     #Not needed if trakectories per region are being queried
     #traj_poses = get_trajectories('pickle', traj_dir, 'reduced_traj.p')
     #if __out: check_traj(traj_poses) 
   
-    """NEED TO ADD "PER ROI" AROUND THE LANDMARK GENERATION"""
     """Create Landmark pins at randomly selected poses from all the trajectory data"""      
-    all_poses = list(itertools.chain.from_iterable(trajectory_poses['ROI_1'].values()))
+    all_poses = list(itertools.chain.from_iterable(trajectory_poses.values()))
     print "number of poses in total = " +repr(len(all_poses))
 
     landmarks = select_landmark_poses(all_poses)
-    print "landmarks = " + repr(landmarks)
-
+    if __out: print "landmarks = " + repr(landmarks)
     pins = Landmarks(landmarks)
-
-
-
+    
+    objects_per_trajectory = trajectory_object_dist(objects.all_objects, trajectory_poses)
+    landmarks_per_trajectory = trajectory_object_dist(pins.poses_landmarks, trajectory_poses)
+    if __out: print objects_per_trajectory['7d638405-b2f8-55ce-b593-efa8e3f2ff2e']
+    if __out: print landmarks_per_trajectory['7d638405-b2f8-55ce-b593-efa8e3f2ff2e']
 
     rospy.spin()  

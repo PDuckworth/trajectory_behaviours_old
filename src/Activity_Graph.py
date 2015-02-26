@@ -624,10 +624,12 @@ class Activity_Graph():
   
       
 if __name__  == '__main__':
+    import sys
     import cPickle as pickle
     import itertools
+    import learn_traj_behaviours as ltb
 
-    date     = '__16_02_2015'
+    date     = '__19_02_2015'
     qsr = 'qtcb'
     q = '0_01'
     v = False
@@ -639,67 +641,36 @@ if __name__  == '__main__':
 
     base_data_dir = '/home/strands/STRANDS/'
     qsr_dir = os.path.join(base_data_dir, 'qsr_dump/')
-
     episodes_dict = pickle.load(open(os.path.join(qsr_dir + 'episodes__' + qsr_tag + '.p')))   
-    
+
+    params = (None, 1, 3, 4)
+    params_tag = map(str, params)
+    params_tag = '_'.join(params_tag)
+    tag = params_tag + date
+  
+    print params
+    print tag
+
     #episodes_file = 'd064d7be-7afe-5b32-a94a-e9800813ff99__1__143'
     #episodes_file = '5825202f-00c7-5a5b-957b-35bc0dc914f1__1__39'
     #episodes_file = '21c75fa0-2ed9-5359-b4db-250142fe0f5d__1__279'
     #episodes_file = '89c29b5f-e568-56ea-bca2-f3e59ddff3f7__1__119'
-    episodes_file = '0824a8d9-cf9c-5aca-89fc-03e08c14275f__1__40'
+    episodes_file = 'bf7e7423-9d1e-511a-acc0-f143e29e51ba__1__116'
     all_episodes = episodes_dict[episodes_file]
     episodes      = list(itertools.chain.from_iterable(all_episodes.values()))
-    activity_graph = Activity_Graph(episodes)
+    activity_graph = Activity_Graph(episodes, params)
 
     activity_graph.graph2dot('/tmp/act_ntc.dot', False)
     print activity_graph.graph
+    #act_graph.graph2hive('/tmp/act_hive_no_coll.html',temporal_rels, spatial_rels, obj_types)
 
-    activity_graph.get_valid_graphlets(cores = 4, max_episodes=3, \
-                min_rows=None, max_rows=2)
+    activity_graph.get_valid_graphlets()
 
-    print activity_graph.graphlet_hash_cnts
-    print "skip: "
-    for hash in activity_graph.valid_graphlets[(1,40)]:
-        for vertex in activity_graph.valid_graphlets[(1,40)][hash].object_nodes:
+    print "hash counts = " + repr(activity_graph.graphlet_hash_cnts)
+    print ""
+    for hash in activity_graph.valid_graphlets[(1,106)]:
+        for vertex in activity_graph.valid_graphlets[(1,106)][hash].object_nodes:
             print vertex['obj_type']
         print ""
-
-
-    #print activity_graph.valid_graphlets[(1, 40)][-8624775419517782557].graph
-
-    #valid_graphlet = activity_graph.get_krishna_graphemes(min_rows=None, max_rows=3)    
-
-    #episodes_file = '/usr/not-backed-up/data_sets/race/cornell_human_activities/CAD_120/relational_data/Subject1__arranging_objects__placing__0510175411__episodes.p'
-    #episodes_dict = pickle.load(open(episodes_file))
-    #episodes = list(itertools.chain.from_iterable(episodes_dict.values()))
-    #act_graph = Activity_Graph(episodes)
     
-    #temporal_rels = ['meets','before','during','overlaps','starts','finishes','equal']
-    
-    #spatial_rels  = ['touch','near','far']
-    #obj_types = ['Head','box','LH','RH']
-    #graph_file = 'arranging_objects0510175411.txt'
-    
-    ##graph_file = 'input_simple.txt'
-    ##spatial_rels  = ['DC','Po','P']
-    ##obj_types = ['rh','lh','obj']
-    
-    #act_graph = Activity_Graph(graph_file)
-    #act_graph.graph2hive('/tmp/act_hive_no_coll.html',temporal_rels, spatial_rels, obj_types)
-    #act_graph.graph2dot('/tmp/act_coll.dot')
-    #print act_graph.abstract_graph
-    #print act_graph.graph
-    
-    #spatial_rels  = ['DC','Po','P']
-    #(bins,code_book) = get_interactions_codebook(temporal_rels, spatial_rels)
-    #print code_book
-    #print len(code_book)
-    #print act_graph.get_grapheme_histogram(bins, code_book)
-    
-    #episodes = [('112', 'LH', '113', 'RH', 'far', 59, 190), ('112', 'LH', '113', 'RH', 'near', 1, 58)]
-    
-    #episodes = [('Head', 'Head', 'RH', 'RH', 'touch', 0, 841), ('Head', 'Head', 'RH', 'RH', 'near', 842, 1000), ('Head', 'Head', 'LH', 'LH', 'touch', 0, 841), ('Head', 'Head', 'LH', 'LH', 'near', 842, 1000), ('Head', 'Head', 'remote', 'remote', 'touch', 0, 841), ('Head', 'Head', 'remote', 'remote', 'far', 842, 887), ('Head', 'Head', 'remote', 'remote', 'near', 888, 1000), ('RH', 'RH', 'LH', 'LH', 'touch', 0, 841), ('RH', 'RH', 'LH', 'LH', 'near', 842, 1000), ('RH', 'RH', 'remote', 'remote', 'touch', 0, 841), ('RH', 'RH', 'remote', 'remote', 'far', 842, 870), ('RH', 'RH', 'remote', 'remote', 'near', 871, 1000), ('LH', 'LH', 'remote', 'remote', 'touch', 0, 841), ('LH', 'LH', 'remote', 'remote', 'near', 842, 887), ('LH', 'LH', 'remote', 'remote', 'touch', 888, 1000)]
-    
-
-        
-    
+ 
