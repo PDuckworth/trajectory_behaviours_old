@@ -25,8 +25,9 @@ from qsrlib.qsrlib import QSRlib_Request_Message
 from qsrlib_io.world_trace import Object_State, World_Trace
 from qsrlib_ros.qsrlib_ros_client import QSRlib_ROS_Client
 
-from query_examples import get_query
 import obtain_trajectories as ot
+from novelTrajectories.traj_data_reader.py import *
+
 
 # create logger with 'spam_application'
 logger = logging.getLogger('traj_learner')
@@ -36,7 +37,7 @@ if not os.path.isdir('/tmp/logs'):
     os.system('mkdir -p /tmp/logs')
 fh = logging.FileHandler('/tmp/logs/traj_learner.log')
 fh.setLevel(logging.DEBUG)
-# create console handler with a higher log level
+# create console handleqsr_out_r with a higher log level
 ch = logging.StreamHandler()
 ch.setLevel(logging.INFO)
 # create formatter and add it to the handlers
@@ -47,124 +48,6 @@ ch.setFormatter(formatter)
 logger.addHandler(fh)
 logger.addHandler(ch)
 
-#**************************************************************#
-#        Implement QSR Lib on objects and trajectories         #
-#**************************************************************#
-
-options = {"rcc3": "rcc3_rectangle_bounding_boxes_2d",
-           "qtcb": "qtc_b_simplified",
-           "qtcc": "qtc_c_simplified",
-           "qtcbc": "qtc_bc_simplified",
-           "rcc3a": "rcc3_rectangle_bounding_boxes_2d"}
-
-
-def get_qsrlib_world(uuid, objects, poses, params):
-    (qsr, _q,v,n) =  params
-
-    #convert q from string to float
-    q = float('0.' + _q.split('_')[1])
-
-    o1 = []          #object 1 is always the trajectory
-    o2_dic = {}      #object 2 is always the SOMA objects
-    worlds = {}
-
-    for obj in objects:
-        o2_dic[obj] = []
-        key = (uuid, obj)
-        if __out: print "worlds key: " + repr(key)
-        worlds[key] = World_Trace()
-
-    for frame, (x,y,z) in enumerate(poses):
-        if __out: print "Frame # " + repr(frame)
-
-        o1.append(Object_State(name="trajectory", timestamp = frame, x=x, y=y, \
-                quantisation_factor=q, validate=v, no_collapse=n))
-        if __out: print "   added trajectory pose" + repr(frame) + " to o1."
-
-        for obj in objects:            
-            (x,y,z) = objects[obj]
-            if __out: print "   added object = " + repr(obj) + "  to o2"
-
-            o2_dic[obj].append(Object_State(name=obj, timestamp = frame, x=x, y=y, \
-                quantisation_factor=q, validate=v, no_collapse=n))
-    
-        if __out: print "number of traj poses= " + repr(len(o1))
-        if __out: print "paired with objects: " + repr(o2_dic.keys())
-    
-    for obj, o2 in o2_dic.items():
-        worlds[(uuid, obj)].add_object_state_series(o1)
-        worlds[(uuid, obj)].add_object_state_series(o2)
-    return worlds
-
-
-def apply_qsr_lib(objects_per_trajectory, trajectories, params, qsr_file):
-    "Formats the object and trajectories and passes to qsrlib"
-
-    spatial_relations = {}
-    which_qsr = options[params[0]]
-    if __out: print "Qsr: " + repr(which_qsr)
-    if __out: print "With params: " + repr(params)
-
-    #client_node = rospy.init_node("qsr_lib_ros_client")    
-
-    for uuid, poses in trajectories.items():
-        objects = objects_per_trajectory[uuid]
-
-        if __out: print repr(uuid) + ",  #poses = " + repr(len(poses))
-        if __out: print "object file: " + repr(objects)
-
-        worlds = get_qsrlib_world(uuid, objects, poses, params)
-        spatial_relations[uuid] = {}
-
-        for (uuid, obj), world in worlds.items():
-            qsrlib_request_message = QSRlib_Request_Message(which_qsr=which_qsr, \
-                   input_data=world, include_missing_data=True)
-            cln = QSRlib_ROS_Client()
-            req = cln.make_ros_request_message(qsrlib_request_message)
-            res = cln.request_qsrs(req)
-            out = pickle.loads(res.data)
-            if __out: print("Request was made at ", str(out.timestamp_request_made))
-
-            for t in out.qsrs.get_sorted_timestamps():
-                if t not in spatial_relations[uuid]:       
-                    spatial_relations[uuid][t] = {}
-                
-                relations = str(out.qsrs.trace[t].qsrs.values()[0].qsr)
-                spatial_relations[uuid][t][(uuid, obj)] = relations
-                #print spatial_relations[uuid][t][(uuid, obj)]
-
-    #spatial_relations is a list of dictionaries. One per Trajectory, key=(uuid,objs). values=poses.
-    pickle.dump(spatial_relations, open(qsr_file, 'w'))
-    return spatial_relations
-
-
-
-#**************************************************************#
-#     Compute Episode Representation of the Spatial Relations  #
-#**************************************************************#
-
-def generate_episode_data(spatial_relations, output_file, noise_thres=3):
-    from data_processing_utils import  compute_episodes, filter_intervals
-
-    cnt=0
-    all_episodes = {}
-    NOISE_THRESHOLD = noise_thres
-
-    for uuid in spatial_relations:
-        key, epi  = compute_episodes(spatial_relations[uuid], cnt, __out)
-
-        # Filter the episods to remove very short transitions that are noise
-        fepi = {}
-        for e in epi:
-            fepi[e] = filter_intervals(epi[e], NOISE_THRESHOLD)
-
-        # Add filtered episodes to all_episodes
-        all_episodes[key] = fepi
-        cnt+=1
-    
-    pickle.dump(all_episodes, open(output_file,'w'))
-    logger.info('3. Episode Data Generated and saved to:\n' + output_file) 
-    return all_episodes
 
 
 #**************************************************************#
@@ -297,8 +180,6 @@ def AG_setup(my_data, date):
 
 
 
-
-
 if __name__ == "__main__":
     global __out
     rospy.init_node("trajectory_learner")
@@ -358,16 +239,28 @@ if __name__ == "__main__":
     if '1' in sections_dic:
         
         logger.info('1. Loading Objects and Trajectory Data')
-        traj_dir = os.path.join(base_data_dir, 'trajectory_dump')
 
-        #regions_of_interest = get_soma_roi()
+        objects = ot.query_objects()
+        query = query ='''{"loc": { "$geoWithin": { "$geometry":
+        { "type" : "Polygon", "coordinates" : [ [ 
+                    [ -0.0002246355582968818, 
+                        -2.519034444503632e-05],
+                    
+                    [  -0.0002241486476179944, 
+                        -7.42736662147081e-05], 
+                    [  -0.000258645873657315, 
+                        -7.284014769481928e-05],
+                    [   -0.0002555339747090102, 
+                        -2.521782172948406e-05],
+                    [   -0.0002246355582968818, 
+                        -2.519034444503632e-05]
+                ] ] }}}}'''
+ 
+        trajectory_poses = ot.query_trajectories(query)
+        
+        sys.exit(1)
+        
 
-        objects = ot.objects_in_scene()
-        if __out: objects.check()
-   
-        #traj_poses = get_trajectories('pickle', traj_dir, 'reduced_traj.p')
-        trajectory_poses = ot.get_trajectories('mongo', traj_dir)
-        if __out: ot.check_traj(trajectory_poses) 
     
         all_poses = list(itertools.chain.from_iterable(trajectory_poses.values()))
         if __out: print "number of poses in total = " +repr(len(all_poses))
@@ -378,14 +271,12 @@ if __name__ == "__main__":
         if __out: print pins.poses_landmarks
 
         """TO PLAY WITH LANDMARKS INSTEAD OF OBJECTS"""
-        static_things = objects.all_objects
-        static_things = pins.poses_landmarks
-
-        if __out: print "objects: " + repr(static_things)
+        object_poses = objects.all_objects
+        object_poses = pins.poses_landmarks
 
         #Find Euclidean distance between each trajectory and the landmarks or objects :)
-        objects_per_trajectory = ot.trajectory_object_dist(static_things, trajectory_poses)
-        if __out: print objects_per_trajectory['7d638405-b2f8-55ce-b593-efa8e3f2ff2e']
+        objects_per_trajectory = ot.trajectory_object_dist(object_poses, trajectory_poses)
+
 
     #**************************************************************#
     #          Apply QSR Lib to Objects and Trajectories           #
@@ -397,11 +288,11 @@ if __name__ == "__main__":
         logger.info('2. Apply QSR Lib')
         qsr_dir, qsr_tag = qsr_setup(base_data_dir, qsr_params, date)
         qsr_out_file = os.path.join(qsr_dir + 'all_qsrs__' + qsr_tag + '.p')
-        if __out: print qsr_out_file        
-
+        if __out: print qsr_out_file
 
         try:
-            spatial_relations = apply_qsr_lib(objects_per_trajectory, trajectory_poses, qsr_params, qsr_out_file)
+            objects_traj_info = (objects_per_trajectory, object_poses, trajectory_poses)
+            spatial_relations = apply_qsr_lib(objects_traj_info, qsr_params, qsr_out_file) 
         except NameError:
             print "2: 'Apply QSR Lib' needs Data. One of either: objects, trajectories, or parameters was not loaded correctly."
             if '1' not in sections_dic: print "Try re-running with arg = '1'\n"
