@@ -26,7 +26,7 @@ from qsrlib_io.world_trace import Object_State, World_Trace
 from qsrlib_ros.qsrlib_ros_client import QSRlib_ROS_Client
 
 import obtain_trajectories as ot
-from novelTrajectories.traj_data_reader.py import *
+from novelTrajectories.traj_data_reader import *
 
 
 # create logger with 'spam_application'
@@ -257,25 +257,22 @@ if __name__ == "__main__":
                 ] ] }}}}'''
  
         trajectory_poses = ot.query_trajectories(query)
-        
-        sys.exit(1)
-        
+        print type(trajectory_poses.trajs)
 
-    
-        all_poses = list(itertools.chain.from_iterable(trajectory_poses.values()))
+        all_poses = list(itertools.chain.from_iterable(trajectory_poses.trajs.values()))
         if __out: print "number of poses in total = " +repr(len(all_poses))
-        landmarks = ot.select_landmark_poses(all_poses)
+        #landmarks = ot.select_landmark_poses(all_poses)
      
-        pins = ot.Landmarks(landmarks)
+        #pins = ot.Landmarks(landmarks)
         if __out: print "landmark poses = " + repr(landmarks)
-        if __out: print pins.poses_landmarks
+        #if __out: print pins.poses_landmarks
 
         """TO PLAY WITH LANDMARKS INSTEAD OF OBJECTS"""
         object_poses = objects.all_objects
-        object_poses = pins.poses_landmarks
+        #object_poses = pins.poses_landmarks
 
         #Find Euclidean distance between each trajectory and the landmarks or objects :)
-        objects_per_trajectory = ot.trajectory_object_dist(object_poses, trajectory_poses)
+        #objects_per_trajectory = ot.trajectory_object_dist(object_poses, trajectory_poses)
 
 
     #**************************************************************#
@@ -286,6 +283,15 @@ if __name__ == "__main__":
     if '2' in sections_dic:
         
         logger.info('2. Apply QSR Lib')
+        config_path = os.path.join(base_data_dir + 'config.ini')
+
+        reader = Trajectory_Data_Reader(config_filename = config_path)
+        keeper = Trajectory_QSR_Keeper(objects=object_poses, \
+                   trajectories=trajectory_poses.trajs, reader=reader)    
+
+        keeper.save(data_dir)
+        print "hel3"
+        sys.exit(1)
         qsr_dir, qsr_tag = qsr_setup(base_data_dir, qsr_params, date)
         qsr_out_file = os.path.join(qsr_dir + 'all_qsrs__' + qsr_tag + '.p')
         if __out: print qsr_out_file
