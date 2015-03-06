@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <package>
-  <name>trajectory_qsrs</name>
+  <name>relational_learner</name>
   <version>0.0.0</version>
-  <description>The trajectory_qsrs package</description>
+  <description>The relational_learner package</description>
 
   <!-- One maintainer tag required, multiple allowed, one person per tag --> 
   <!-- Example:  -->
@@ -19,7 +19,7 @@
   <!-- Url tags are optional, but mutiple are allowed, one per tag -->
   <!-- Optional attribute type can be: website, bugtracker, or repository -->
   <!-- Example: -->
-  <!-- <url type="website">http://wiki.ros.org/trajectory_qsrs</url> -->
+  <!-- <url type="website">http://wiki.ros.org/relational_learner</url> -->
 
 
   <!-- Author tags are optional, mutiple are allowed, one per tag -->
@@ -41,7 +41,9 @@
   <!--   <test_depend>gtest</test_depend> -->
   <buildtool_depend>catkin</buildtool_depend>
   <build_depend>rospy</build_depend>
+  <build_depend>std_msgs</build_depend>
   <run_depend>rospy</run_depend>
+  <run_depend>std_msgs</run_depend>
 
 
   <!-- The export tag contains other, unspecified, tags -->
