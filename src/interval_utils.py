@@ -112,7 +112,6 @@ def get_valid_graphlets_from_activity_intervals(episodes, params):
     
     # Gather the episodes and interval data    
     for fields in episodes:
-        
         start = fields[5]
         end   = fields[6]
         # Use codes for the episodes throughout the function

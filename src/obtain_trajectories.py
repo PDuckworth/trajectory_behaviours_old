@@ -16,17 +16,13 @@ import cPickle as pickle
 import random
 import landmark_utils  as lu
 from scipy import spatial
+
 from interactive_markers.interactive_marker_server import *
 from visualization_msgs.msg import *
-from geometry_msgs.msg import Point
 
-from geometry_msgs.msg import Pose
-#from trajectory import Trajectory, TrajectoryAnalyzer
-
-from human_trajectory.msg import Trajectory
-from human_trajectory.msg import Trajectories
+from geometry_msgs.msg import Point,Pose
+from human_trajectory.msg import Trajectory,Trajectories
 from soma_trajectory.srv import TrajectoryQuery, TrajectoryQueryRequest, TrajectoryQueryResponse
-
 from soma_geospatial_store.geospatial_store import GeoSpatialStoreProxy
 
 logger = logging.getLogger('obtain_trajectories')
@@ -103,9 +99,8 @@ def trajectory_object_dist(objects, trajectory_poses):
         #object_distances[(uuid, obj)] = [] #No need for list, if only taking init_pose
         #print (uuid, obj)
 
-        #Just select the first trajectory pose for now :)
-        traj_init_pose = trajectory_poses[uuid][0]
-        object_pose = objects[obj] #Objects only have one pose
+        traj_init_pose = trajectory_poses[uuid][0][:2]  #Select the first trajectory pose for now
+        object_pose = objects[obj][0:2]                 #Objects only have one pose
         dist = spatial.distance.pdist([traj_init_pose, object_pose], 'euclidean')
 
         if uuid not in object_distances:
@@ -117,7 +112,7 @@ def trajectory_object_dist(objects, trajectory_poses):
         if len(object_distances[uuid]) != len(distance_objects[uuid]):
             print "multiple objects exactly the same distance from trajectory: " + repr(uuid)
             print "object: " + repr(obj)
-            sys.exit(1)
+            continue
 
     closest_objects = {}
     for uuid, dist_objs in distance_objects.items():
@@ -159,6 +154,15 @@ class query_trajectories():
                 z=entry.pose.position.z
                 self.trajs[trajectory.uuid].append((x,y,z))
 
+
+def convert_keys_to_string(dictionary):
+    """Recursively converts dictionary keys to strings."""
+    if isinstance(dictionary, unicode):
+        return str(dictionary)
+    elif isinstance(dictionary, list):
+        return dictionary
+    return dict((str(k), convert_keys_to_string(v)) 
+        for k, v in dictionary.items())
     
     
 if __name__ == "__main__":
@@ -173,9 +177,8 @@ if __name__ == "__main__":
     cnt=0
 
     for roi in gs.roi_ids(soma_map, soma_config):
-
         cnt+=1
-        print 'ROI: ', gs.type_of_roi(roi, soma_map, soma_config)
+        print 'ROI: ', gs.type_of_roi(roi, soma_map, soma_config), roi
         geom = gs.geom_of_roi(roi, soma_map, soma_config)
         res = gs.objs_within_roi(geom, soma_map, soma_config)
         if res == None:
@@ -187,45 +190,64 @@ if __name__ == "__main__":
             objects_in_roi[key] = i['loc']['coordinates']       
             print key, objects_in_roi[key]
 
-        #query = '''{"loc": { "$geoWithin": { "$geometry": %s }}}''' %geom
-        query ='''{"loc": { "$geoWithin": { "$geometry":
-        { "type" : "Polygon", "coordinates" : [ [ 
-                    [ -0.0002246355582968818, 
-                      -2.519034444503632e-05],
-                    [ -0.0002241486476179944, 
-                      -7.42736662147081e-05], 
-                    [ -0.000258645873657315, 
-                      -7.284014769481928e-05],
-                    [ -0.0002555339747090102, 
-                      -2.521782172948406e-05],
-                    [ -0.0002246355582968818, 
-                      -2.519034444503632e-05]
-                    ] ] }}}}'''
+        #geom_str = convert_keys_to_string(geom)
+        query = '''{"loc": { "$geoWithin": { "$geometry": 
+        { "type" : "Polygon", "coordinates" : %s }}}}''' %geom['coordinates']
+
+        #Resource room 12
+        #query ='''{"loc": { "$geoWithin": { "$geometry":
+        #{ "type" : "Polygon", "coordinates" : [ [ 
+        #            [ -0.0002246355582968818, 
+        #              -2.519034444503632e-05],
+        #            [ -0.0002241486476179944, 
+        #             -7.42736662147081e-05], 
+        #            [ -0.000258645873657315, 
+        #              -7.284014769481928e-05],
+        #            [ -0.0002555339747090102, 
+        #              -2.521782172948406e-05],
+        #            [ -0.0002246355582968818, 
+        #              -2.519034444503632e-05]
+        #            ] ] }}}}'''
+
+        #Library 20
+        #query ='''{"loc": { "$geoWithin": { "$geometry":
+        #{ "type" : "Polygon", "coordinates" : [ [ 
+        #    [0.0001383168733184448, 5.836986395024724e-05], 
+        #    [6.036547989651808e-05, 6.102209576397399e-05], 
+        #    [5.951977148299648e-05, 0.0001788888702378699], 
+         #   [-7.723460844033525e-05, 0.0001792680245529255], 
+         #   [-7.442872255580824e-05, 0.0002988450114997931], 
+          #  [0.0001391722775849757, 0.0003004005321542991], 
+           # [0.0001383168733184448, 5.836986395024724e-05]
+        #] ] }}}}'''
+
 
         q = query_trajectories(query)
         trajectory_poses = q.trajs
 
-        raw_input("Press enter to continue")
         if len(trajectory_poses)==0:
             print "No Trajectories in this Region"            
             continue
         else:
             print "number of unique traj returned = " + repr(len(trajectory_poses))
+        raw_input("Press enter to continue")
 
         """Create Landmark pins at randomly selected poses from all the trajectory data"""      
         all_poses = list(itertools.chain.from_iterable(trajectory_poses.values()))
         print "number of poses in total = " +repr(len(all_poses))
 
-        data_dir='/home/strands/STRANDS'
-        obj_file  = os.path.join(data_dir, 'obj_dump.p')
-        traj_file = os.path.join(data_dir, 'traj_dump.p')
-        pickle.dump(objects_in_roi, open(obj_file, 'w'))
-        pickle.dump(trajectory_poses, open(traj_file, 'w'))
 
+        ##To Dump trajectories for testing
+        #data_dir='/home/strands/STRANDS'
+        #obj_file  = os.path.join(data_dir, 'obj_dump.p')
+        #traj_file = os.path.join(data_dir, 'traj_dump.p')
+        #pickle.dump(objects_in_roi, open(obj_file, 'w'))
+        #pickle.dump(trajectory_poses, open(traj_file, 'w'))
 
         #pins = lu.Landmarks(select_landmark_poses(all_poses))
         #static_things = pins.poses_landmarks
         #static_things = objects_in_roi
         #objects_per_trajectory = trajectory_object_dist(static_things, trajectory_poses)
-        
+
+    print "running rospy.spin()"    
     rospy.spin()  

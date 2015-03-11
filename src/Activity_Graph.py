@@ -3,13 +3,11 @@
 """Activity_Graph.py: File with Activity Graph Class."""
 
 __author__      = "Krishna Dubba & Paul Duckworth"
-__copyright__   = "Copyright 2014, University of Leeds"
+__copyright__   = "Copyright 2015, University of Leeds"
 
 import os
-import logging
 import multiprocessing
 import time
-
 
 from igraph import Graph
 from itertools import combinations, permutations, product
@@ -17,7 +15,6 @@ from graph_hash import graph_hash
 from interval_utils import get_valid_graphlets_from_activity_intervals, \
      get_temporal_neighbourhood_graphlets_from_activity_intervals, Episodes
 
-#logger = logging.getLogger('redvine.generate_activity_graph')
 
 def get_allen_relation(is1, ie1, is2, ie2):
 
@@ -130,7 +127,6 @@ class Activity_Graph():
         self.graphlet_hash_cnts = {}
 
         self.graph              = self.get_activity_graph(episodes, COLLAPSE_TEMPORAL_NODES)
-        #self.logger             = logging.getLogger('redvine.generate_activity_graph.Activity_Graph')
         self.params = params
 
     @property    
@@ -359,7 +355,6 @@ class Activity_Graph():
         # Write the graph to dot file
         # Can generate a graph figure from this .dot file using the 'dot' command
         # dot -Tpng input.dot -o output.png
-        #self.logger.info('Generating for file for activity graph: ' + out_dot_file)
         dot_file = open(out_dot_file, 'w')
         dot_file.write('digraph activity_graph {\n')
         dot_file.write('    size = "45,45";\n')
@@ -426,7 +421,6 @@ class Activity_Graph():
                    collapse_spatial_nodes=False, collapse_object_nodes=False):
         import numpy as np
 
-        #self.logger.info('Generating for file for activity graph: ' + out_hive_file)
         temporal_code = 0
         spatial_code  = 1
         obj_type_code = 2
@@ -627,50 +621,38 @@ if __name__  == '__main__':
     import sys
     import cPickle as pickle
     import itertools
-    import learn_traj_behaviours as ltb
+    from novelTrajectories.traj_data_reader import *
 
     date     = '__19_02_2015'
-    qsr = 'qtcb'
-    q = '0_01'
-    v = False
-    n = True
-    qsr_params = (qsr, q,v,n)
-    qsr_params_tag = map(str, qsr_params)
-    qsr_params_tag = '__'.join(qsr_params_tag)
-    qsr_tag = qsr_params_tag + date
-
     base_data_dir = '/home/strands/STRANDS/'
     qsr_dir = os.path.join(base_data_dir, 'qsr_dump/')
-    episodes_dict = pickle.load(open(os.path.join(qsr_dir + 'episodes__' + qsr_tag + '.p')))   
 
     params = (None, 1, 3, 4)
     params_tag = map(str, params)
     params_tag = '_'.join(params_tag)
-    tag = params_tag + date
-  
+    tag = params_tag + date 
     print params
     print tag
 
-    #episodes_file = 'd064d7be-7afe-5b32-a94a-e9800813ff99__1__143'
-    #episodes_file = '5825202f-00c7-5a5b-957b-35bc0dc914f1__1__39'
-    #episodes_file = '21c75fa0-2ed9-5359-b4db-250142fe0f5d__1__279'
-    #episodes_file = '89c29b5f-e568-56ea-bca2-f3e59ddff3f7__1__119'
-    episodes_file = 'bf7e7423-9d1e-511a-acc0-f143e29e51ba__1__116'
-    all_episodes = episodes_dict[episodes_file]
-    episodes      = list(itertools.chain.from_iterable(all_episodes.values()))
-    activity_graph = Activity_Graph(episodes, params)
+    episodes_file = 'd6c54902-3259-5ff4-b1ca-9ed5132df53d__1__101'
+    ep = Episodes(load_from_file="all_episodes.p", dir=base_data_dir)
+    ep2 = ep.all_episodes[episodes_file]
+    episodes      = list(itertools.chain.from_iterable(ep2.values()))
 
-    activity_graph.graph2dot('/tmp/act_ntc.dot', False)
+
+    activity_graph = Activity_Graph(episodes, params)
+    activity_graph.get_valid_graphlets()
+
+    activity_graph.graph2dot('/tmp/TEST.dot', False)
+    os.system('dot -Tpng /tmp/TEST.dot -o /tmp/TEST.png')
     print activity_graph.graph
     #act_graph.graph2hive('/tmp/act_hive_no_coll.html',temporal_rels, spatial_rels, obj_types)
 
-    activity_graph.get_valid_graphlets()
-
+    """
     print "hash counts = " + repr(activity_graph.graphlet_hash_cnts)
     print ""
-    for hash in activity_graph.valid_graphlets[(1,106)]:
-        for vertex in activity_graph.valid_graphlets[(1,106)][hash].object_nodes:
+    for hash in activity_graph.valid_graphlets[(1,101)]:
+        for vertex in activity_graph.valid_graphlets[(1,101)][hash].object_nodes:
             print vertex['obj_type']
-        print ""
-    
+    """
  

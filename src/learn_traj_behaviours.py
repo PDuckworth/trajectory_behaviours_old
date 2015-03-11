@@ -3,7 +3,7 @@
 """compute_spatial_relations.py: Computes spatial relations."""
 
 __author__      = "Paul Duckworth"
-__copyright__   = "Copyright 2014, University of Leeds"
+__copyright__   = "Copyright 2015, University of Leeds"
 
 import rospy
 import pymongo
@@ -19,7 +19,9 @@ from scipy import spatial
 import cPickle as pickle
 
 from geometry_msgs.msg import Pose
-from trajectory import Trajectory, TrajectoryAnalyzer
+from human_trajectory.msg import Trajectory, Trajectories
+from soma_trajectory.srv import TrajectoryQuery, TrajectoryQueryRequest, TrajectoryQueryResponse
+from soma_geospatial_store.geospatial_store import GeoSpatialStoreProxy
 
 from qsrlib.qsrlib import QSRlib_Request_Message
 from qsrlib_io.world_trace import Object_State, World_Trace
@@ -28,26 +30,7 @@ from qsrlib_ros.qsrlib_ros_client import QSRlib_ROS_Client
 import obtain_trajectories as ot
 from novelTrajectories.traj_data_reader import *
 
-
-# create logger with 'spam_application'
-logger = logging.getLogger('traj_learner')
-logger.setLevel(logging.DEBUG)
-# create file handler which logs even debug messages
-if not os.path.isdir('/tmp/logs'):
-    os.system('mkdir -p /tmp/logs')
-fh = logging.FileHandler('/tmp/logs/traj_learner.log')
-fh.setLevel(logging.DEBUG)
-# create console handleqsr_out_r with a higher log level
-ch = logging.StreamHandler()
-ch.setLevel(logging.INFO)
-# create formatter and add it to the handlers
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-fh.setFormatter(formatter)
-ch.setFormatter(formatter)
-# add the handlers to the logger
-logger.addHandler(fh)
-logger.addHandler(ch)
-
+from learningArea import Learning
 
 
 #**************************************************************#
@@ -60,14 +43,13 @@ def generate_graph_data(episodes, data_dir, params):
     AG_out_file = os.path.join(data_dir + 'activity_graphs_' + tag + '.p')
     if __out: print AG_out_file
 
-    activity_graphs = {}
-    logger.info('4. Generating activity graphs from episodes')
-
     cnt=0
+    activity_graphs = {}
+
     for episodes_file in episodes:  
 
         uuid, start, end = episodes_file.split('__')        
-        logger.info('4. Processing for graphlets: ' + episodes_file)
+        if __out: rospy.loginfo('Processing for graphlets: ' + episodes_file)
 
         episodes_dict = episodes[episodes_file]
         episodes_list = list(itertools.chain.from_iterable(episodes_dict.values()))
@@ -75,20 +57,30 @@ def generate_graph_data(episodes, data_dir, params):
         activity_graphs[episodes_file] = Activity_Graph(episodes_list, params)
         activity_graphs[episodes_file].get_valid_graphlets()
 
-                
-        if __out and cnt == 1:
-            activity_graphs[episodes_file].graph2dot('/tmp/act_ntc.dot', False)
-            print "episode file 1: " +repr(episodes_file)
-            print activity_graphs[episodes_file].graph
-            print "episode file 2: " +repr(episodes_file)
-            print activity_graphs[episodes_file].valid_graphlets
-            #sys.exit(1)   
+        if __out and cnt == 0: graph_check(activity_graphs, episodes_file) #print details of one activity graph
+
         cnt+=1
         print cnt
       
     pickle.dump(activity_graphs, open(AG_out_file,'w')) 
-    logger.info('4. Activity Graph Data Generated and saved to:\n' + AG_out_file) 
+    rospy.loginfo('4. Activity Graph Data Generated and saved to:\n' + AG_out_file) 
     return
+
+
+
+def graph_check(gr, ep_file):
+    """Prints to /tmp lots """
+    gr[ep_file].graph2dot('/tmp/act_gr.dot', False)
+    os.system('dot -Tpng /tmp/act_gr.dot -o /tmp/act_gr.png')
+    print "graph: " + repr(ep_file)
+    print gr[ep_file].graph
+
+    gr2 = gr[ep_file].valid_graphlets
+    for cnt_, i in enumerate(gr2[gr2.keys()[0]].values()):
+        i.graph2dot('/tmp/graphlet.dot', False) 
+        cmd = 'dot -Tpng /tmp/graphlet.dot -o /tmp/graphlet_%s.png' % cnt_
+        os.system(cmd)
+
 
 
 def generate_feature_space(data_dir, tag):
@@ -116,9 +108,9 @@ def generate_feature_space(data_dir, tag):
         print "BOOK OF HASHES DOES NOT EQUAL BOOK OF ACTIVITY GRAPHS"
         sys.exit(1)
 
-    logger.info('5. Generating codebook FINISHED')
-    logger.info('5. Generating features')
+    rospy.loginfo('5. Generating codebook FINISHED')
 
+    rospy.loginfo('5. Generating features')
     cnt = 0
     X_source_U = []
     #Histograms are Windowed dictionaries of histograms 
@@ -143,8 +135,8 @@ def generate_feature_space(data_dir, tag):
     pickle.dump(feature_space, open(feature_space_out_file, 'w'))
     print "\nall graph and histogram data written to: \n" + repr(data_dir) 
     
-    logger.info('Done')
-    return
+    rospy.loginfo('Done')
+    return feature_space
 
 
 
@@ -188,12 +180,9 @@ if __name__ == "__main__":
     parser.add_argument("sections", help="chose what section of code to run", type=str)
     args = parser.parse_args()
  
-    run_options = {'1': "Get Objects & Trajectories",
-                   '2': "Apply QSR Lib",
-                   '3': "Generate Episodes",
-                   '4': "Activity Graphs/Graphlets",
-                   '5': "Generate Code Book and Histograms",
-                   '6': "Learn unsupervised behaviours"}
+    run_options = {'1': "Get Object/Trajectories and Generate Graphs",
+                   '2': "Unsupervised learning on feature space",
+                   '7': "Test"}
 
     sections = args.sections
     sections_dic={}
@@ -220,6 +209,7 @@ if __name__ == "__main__":
     
     user = getpass.getuser()
     base_data_dir = os.path.join('/home/' + user + '/STRANDS/')
+    learning_area = os.path.join(base_data_dir, 'learning/')
     options_file = os.path.join(base_data_dir + 'options.txt')
 
     my_data = {}
@@ -232,140 +222,154 @@ if __name__ == "__main__":
     date = my_data['date']
     qsr_params = (my_data['qsr'],my_data['q'],my_data['v'],my_data['n'])
 
-    #**************************************************************#
-    #             Obtain Objects and Trajectories                  #
-    #**************************************************************#
+
+    rospy.loginfo("0. Running ROI query from geospatial_store")
+    gs = GeoSpatialStoreProxy('geospatial_store','soma')
+    ms = GeoSpatialStoreProxy('message_store','soma')
+    soma_map = 'uob_library'
+    soma_config = 'uob_lib_conf'
+    config_path = '/home/strands/STRANDS/config.ini'
+
+    #*******************************************************************#
+    #             Obtain ROI, Objects and Trajectories                  #
+    #*******************************************************************#
     __out = False
-    if '1' in sections_dic:
+    all_objects={}
+
+    for roi in gs.roi_ids(soma_map, soma_config):
+        if '1' not in sections_dic: 
+            continue
+
+        if roi != '12':
+            continue
+
+        if __out: print 'ROI: ', gs.type_of_roi(roi, soma_map, soma_config), roi
+        geom = gs.geom_of_roi(roi, soma_map, soma_config)
         
-        logger.info('1. Loading Objects and Trajectory Data')
+        rospy.loginfo('1. Load trajectories in ROI')
+        res = gs.objs_within_roi(geom, soma_map, soma_config)
+        if res == None:
+            print "No Objects in this Region"            
+            continue
 
-        objects = ot.query_objects()
-        query = query ='''{"loc": { "$geoWithin": { "$geometry":
-        { "type" : "Polygon", "coordinates" : [ [ 
-                    [ -0.0002246355582968818, 
-                        -2.519034444503632e-05],
-                    
-                    [  -0.0002241486476179944, 
-                        -7.42736662147081e-05], 
-                    [  -0.000258645873657315, 
-                        -7.284014769481928e-05],
-                    [   -0.0002555339747090102, 
-                        -2.521782172948406e-05],
-                    [   -0.0002246355582968818, 
-                        -2.519034444503632e-05]
-                ] ] }}}}'''
- 
-        trajectory_poses = ot.query_trajectories(query)
-        print type(trajectory_poses.trajs)
+        objects_in_roi = {}
+        for i in res:
+            key = i['type'] +'_'+ i['soma_id']
+            objects_in_roi[key] = ms.obj_coords(i['soma_id'], soma_map, soma_config)
+            if __out: print key, objects_in_roi[key]
 
-        all_poses = list(itertools.chain.from_iterable(trajectory_poses.trajs.values()))
-        if __out: print "number of poses in total = " +repr(len(all_poses))
+        if __out: print "Number of objects in region = " + repr(len(objects_in_roi))
+        all_objects[roi] = objects_in_roi
+
+        query = '''{"loc": { "$geoWithin": { "$geometry": 
+        { "type" : "Polygon", "coordinates" : %s }}}}''' %geom['coordinates']
+        q = ot.query_trajectories(query)
+        trajectory_poses = q.trajs
+        
+        if len(trajectory_poses)==0:
+            print "No Trajectories in this Region"            
+            continue
+        else:
+            print "number of unique traj returned = " + repr(len(trajectory_poses))
+
+        #objects_per_trajectory = ot.trajectory_object_dist(objects_in_roi, trajectory_poses)
+   
+        #LandMarks instead of Objects - need to select per ROI:
+        #all_poses = list(itertools.chain.from_iterable(trajectory_poses.trajs.values()))
+        #if __out: print "number of poses in total = " +repr(len(all_poses))
         #landmarks = ot.select_landmark_poses(all_poses)
-     
         #pins = ot.Landmarks(landmarks)
-        if __out: print "landmark poses = " + repr(landmarks)
+        #if __out: print "landmark poses = " + repr(landmarks)
         #if __out: print pins.poses_landmarks
 
-        """TO PLAY WITH LANDMARKS INSTEAD OF OBJECTS"""
-        object_poses = objects.all_objects
+        #"""TO PLAY WITH LANDMARKS INSTEAD OF OBJECTS"""
+        #object_poses = objects.all_objects
         #object_poses = pins.poses_landmarks
 
-        #Find Euclidean distance between each trajectory and the landmarks or objects :)
-        #objects_per_trajectory = ot.trajectory_object_dist(object_poses, trajectory_poses)
 
 
     #**************************************************************#
     #          Apply QSR Lib to Objects and Trajectories           #
     #**************************************************************#
-    #Dependant on Objects and Trajectories  
-    __out = False
-    if '2' in sections_dic:
-        
-        logger.info('2. Apply QSR Lib')
-        config_path = os.path.join(base_data_dir + 'config.ini')
+    #Dependant on trajectories and objects
+        __out = False
+        rospy.loginfo('2. Apply QSR Lib')
+        if __out: raw_input("Press enter to continue")
 
         reader = Trajectory_Data_Reader(config_filename = config_path)
-        keeper = Trajectory_QSR_Keeper(objects=object_poses, \
-                   trajectories=trajectory_poses.trajs, reader=reader)    
+        #keeper = Trajectory_QSR_Keeper(objects=objects_in_roi, \
+        #                    trajectories=trajectory_poses, reader=reader)
+        #keeper.save(base_data_dir)
+        load_qsrs = 'all_qsrs_qtcb__0_01__False__True__03_03_2015.p'
+        keeper= Trajectory_QSR_Keeper(reader=reader, load_from_file = load_qsrs, dir=base_data_dir) 
 
-        keeper.save(data_dir)
-        print "hel3"
-        sys.exit(1)
-        qsr_dir, qsr_tag = qsr_setup(base_data_dir, qsr_params, date)
-        qsr_out_file = os.path.join(qsr_dir + 'all_qsrs__' + qsr_tag + '.p')
-        if __out: print qsr_out_file
-
-        try:
-            objects_traj_info = (objects_per_trajectory, object_poses, trajectory_poses)
-            spatial_relations = apply_qsr_lib(objects_traj_info, qsr_params, qsr_out_file) 
-        except NameError:
-            print "2: 'Apply QSR Lib' needs Data. One of either: objects, trajectories, or parameters was not loaded correctly."
-            if '1' not in sections_dic: print "Try re-running with arg = '1'\n"
+        #print keeper.reader.spatial_relations['7d638405-b2f8-55ce-b593-efa8e3f2ff2e'].trace[1].qsrs['Printer (photocopier)_5,trajectory'].qsr
 
     
     #**************************************************************#
     #             Generate Episodes from QSR Data                  #
     #**************************************************************#
-    #Dependant on QSRs
-    __out = False
-    if '3' in sections_dic and '2' not in sections_dic:    
-        logger.info('3. Loading QSR Data from Pickle File')
-        qsr_dir, qsr_tag = qsr_setup(base_data_dir, qsr_params, date)
-        qsr_out_file = os.path.join(qsr_dir + 'all_qsrs__' + qsr_tag + '.p')
-        spatial_relations = pickle.load(open(qsr_out_file))
-        if __out: print len(spatial_relations)
+    #Dependant on QSRs 
+        __out = False
+        rospy.loginfo('3. Generating Episodes')
+        if __out: raw_input("Press enter to continue")
 
-    if '3' in sections_dic:
-        noise_threshold = 3
-        qsr_dir, qsr_tag = qsr_setup(base_data_dir, qsr_params, date)
-        epi_output_file = os.path.join(qsr_dir + 'episodes__' + qsr_tag + '.p')
-        all_episodes = generate_episode_data(spatial_relations, epi_output_file, noise_threshold)
-        if  __out: print "number of episode lists = " + repr(len(all_episodes))
-
+        ep = Episodes(reader=keeper.reader)
+        ep.get_episodes(noise_thres=3, out=__out)
+        ep.save(base_data_dir)
+        if __out: print "episode test: " + repr(ep.all_episodes['5c02e156-493d-55bc-ad21-a4be1d9f95aa__1__22'])
 
     #**************************************************************#
     #            Activity Graphs/Code_book/Histograms              #
     #**************************************************************#
     #Dependant on Episodes
-    __out = False
-    if '4' in sections_dic and '3' not in sections_dic:
-        
-        qsr_dir, qsr_tag = qsr_setup(base_data_dir, qsr_params, date)
-        all_episodes = pickle.load(open(os.path.join(qsr_dir + 'episodes__' + qsr_tag + '.p')))
-        if  __out: print "number of episodes loaded = " + repr(len(all_episodes))
+        __out = False
+        rospy.loginfo('4. Generating Activity Graphs')
+        if __out: raw_input("Press enter to continue")
 
-    if '4' in sections_dic:
         params, tag = AG_setup(my_data, date)
         activity_graph_dir = os.path.join(base_data_dir, 'AG_graphs/')
-        check_dir(activity_graph_dir)
-        if __out: print activity_graph_dir
+        if __out: print params, tag, activity_graph_dir
 
-        generate_graph_data(all_episodes, activity_graph_dir, params)
+        generate_graph_data(ep.all_episodes, activity_graph_dir, params)
         if __out: print "Activity Graphs Done"
+
 
     #**************************************************************#
     #           Generate Feature Space from Histograms             #
     #**************************************************************#     
-    __out = False
-    if '5' in sections_dic:
-        params, tag = AG_setup(my_data, date)
+        rospy.loginfo('5. Generating Feature Space')
+        if __out: raw_input("Press enter to continue")
+        feature_space = generate_feature_space(activity_graph_dir, tag)
+            
+        
+    #**************************************************************#
+    #                    Learn a Clustering model                  #
+    #**************************************************************#
+    if '2' in sections_dic:   
+        __out = True
+        rospy.loginfo('6. Learning on Feature Space')
+
         activity_graph_dir = os.path.join(base_data_dir, 'AG_graphs/')
-        if __out: print activity_graph_dir 
-        generate_feature_space(activity_graph_dir, tag)
+        feature_space = pickle.load(open(os.path.join(activity_graph_dir, \
+                        'feature_space_None_1_3_4__19_02_2015.p')))
+        (cb, gb, X_source_U) = feature_space
+
+        smartThing=Learning(f_space=X_source_U, c_book=cb, g_book=gb, vis=__out)
+    
+        smartThing.kmeans() #Can pass k, or auto selects min(penalty)
+        smartThing.save(learning_area)
+        smartThing.load(learning_area, 'smartThing.p')
 
 
-    """LEARN SOMETHING """ 
-    __out = False
-    if '6' in sections_dic and '5' not in sections_dic:       
-        logger.info('6. Unsupervised Learning on Feature Space')
-        learning_area = os.path.join(base_data_dir, 'relational_learner')
-        check_dir(learning_area)
-        if __out: print learning_area
+    if '3' in sections_dic:  
+        smartThing=Learning(load_from_file='smartThing.p', dir = learning_area)
 
-        print "\nNOW LEARN...\n"
 
-    print ""
+
+
+
+    sys.exit(1)
     logger.info('Running rospy.spin()')
     rospy.spin()
 
