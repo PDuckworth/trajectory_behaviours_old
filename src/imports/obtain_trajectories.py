@@ -25,8 +25,6 @@ from human_trajectory.msg import Trajectory,Trajectories
 from soma_trajectory.srv import TrajectoryQuery, TrajectoryQueryRequest, TrajectoryQueryResponse
 from soma_geospatial_store.geospatial_store import GeoSpatialStoreProxy
 
-logger = logging.getLogger('obtain_trajectories')
-
 #**************************************************************#
 #             Obtain Objects and Trajectories                  #
 #**************************************************************#

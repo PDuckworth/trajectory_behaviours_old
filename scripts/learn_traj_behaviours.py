@@ -21,122 +21,13 @@ import cPickle as pickle
 from geometry_msgs.msg import Pose
 from human_trajectory.msg import Trajectory, Trajectories
 from soma_trajectory.srv import TrajectoryQuery, TrajectoryQueryRequest, TrajectoryQueryResponse
-from soma_geospatial_store.geospatial_store import GeoSpatialStoreProxy
+from soma_geospatial_store.geospatial_store import *
 
-from qsrlib.qsrlib import QSRlib_Request_Message
-from qsrlib_io.world_trace import Object_State, World_Trace
-from qsrlib_ros.qsrlib_ros_client import QSRlib_ROS_Client
-
-import obtain_trajectories as ot
+import imports.obtain_trajectories as ot
+from imports.graphs_handler import *
 from novelTrajectories.traj_data_reader import *
+from imports.learningArea import Learning
 
-from learningArea import Learning
-
-
-#**************************************************************#
-#      Create Activity Graphs For Each Trajectory Instance     #
-#**************************************************************#
-
-def generate_graph_data(episodes, data_dir, params):
-    from Activity_Graph import Activity_Graph
-
-    AG_out_file = os.path.join(data_dir + 'activity_graphs_' + tag + '.p')
-    if __out: print AG_out_file
-
-    cnt=0
-    activity_graphs = {}
-
-    for episodes_file in episodes:  
-
-        uuid, start, end = episodes_file.split('__')        
-        if __out: rospy.loginfo('Processing for graphlets: ' + episodes_file)
-
-        episodes_dict = episodes[episodes_file]
-        episodes_list = list(itertools.chain.from_iterable(episodes_dict.values()))
-
-        activity_graphs[episodes_file] = Activity_Graph(episodes_list, params)
-        activity_graphs[episodes_file].get_valid_graphlets()
-
-        if __out and cnt == 0: graph_check(activity_graphs, episodes_file) #print details of one activity graph
-
-        cnt+=1
-        print cnt
-      
-    pickle.dump(activity_graphs, open(AG_out_file,'w')) 
-    rospy.loginfo('4. Activity Graph Data Generated and saved to:\n' + AG_out_file) 
-    return
-
-
-
-def graph_check(gr, ep_file):
-    """Prints to /tmp lots """
-    gr[ep_file].graph2dot('/tmp/act_gr.dot', False)
-    os.system('dot -Tpng /tmp/act_gr.dot -o /tmp/act_gr.png')
-    print "graph: " + repr(ep_file)
-    print gr[ep_file].graph
-
-    gr2 = gr[ep_file].valid_graphlets
-    for cnt_, i in enumerate(gr2[gr2.keys()[0]].values()):
-        i.graph2dot('/tmp/graphlet.dot', False) 
-        cmd = 'dot -Tpng /tmp/graphlet.dot -o /tmp/graphlet_%s.png' % cnt_
-        os.system(cmd)
-
-
-
-def generate_feature_space(data_dir, tag):
-    
-    AG_out_file = os.path.join(data_dir + 'activity_graphs_' + tag + '.p')
-    activity_graphs = pickle.load(open(AG_out_file))
-    
-    logger.info('5. Generating codebook')
-    code_book, graphlet_book = [], []
-    code_book_set, graphlet_book_set = set([]), set([])
-    for episodes_file in activity_graphs: 
-
-        #for window in activity_graphs[episodes_file].graphlet_hash_cnts:     #Loop through windows, if multiple windows
-        window = activity_graphs[episodes_file].graphlet_hash_cnts.keys()[0]
-
-        for ghash in activity_graphs[episodes_file].graphlet_hash_cnts[window]:
-            if ghash not in code_book_set:
-                code_book_set.add(ghash)
-                graphlet_book_set.add(activity_graphs[episodes_file].valid_graphlets[window][ghash])
-    code_book.extend(code_book_set)
-    graphlet_book.extend(graphlet_book_set)   
-
-    print "len of code book: " + repr(len(code_book))
-    if len(code_book) != len(graphlet_book): 
-        print "BOOK OF HASHES DOES NOT EQUAL BOOK OF ACTIVITY GRAPHS"
-        sys.exit(1)
-
-    rospy.loginfo('5. Generating codebook FINISHED')
-
-    rospy.loginfo('5. Generating features')
-    cnt = 0
-    X_source_U = []
-    #Histograms are Windowed dictionaries of histograms 
-    for episodes_file in activity_graphs:
-        print cnt, episodes_file
-        histogram = activity_graphs[episodes_file].get_histogram(code_book)
-        X_source_U.append(histogram)
-        cnt+=1
-        if cnt ==1:
-            key = activity_graphs[episodes_file].graphlet_hash_cnts.keys()[0]
-            print "KEY = " + repr(key)
-            print "hash counts: " + repr(activity_graphs[episodes_file].graphlet_hash_cnts[key].values())
-            print "sum of hash counts: " + repr(sum(activity_graphs[episodes_file].graphlet_hash_cnts[key].values()))
-            print "sum of histogram: " + repr(sum(histogram))
-    
-    logger.info('Generating features FINISHED')
-    logger.info('Saving all experiment data')       
-    
-    feature_space = (code_book, graphlet_book, X_source_U)
-
-    feature_space_out_file = os.path.join(data_dir + 'feature_space_' + tag + '.p')
-    pickle.dump(feature_space, open(feature_space_out_file, 'w'))
-    print "\nall graph and histogram data written to: \n" + repr(data_dir) 
-    
-    rospy.loginfo('Done')
-    return feature_space
 
 
 
@@ -156,20 +47,6 @@ def qsr_setup(data_dir, params, date):
     return qsr_dir, qsr_tag
 
 
-def AG_setup(my_data, date):
-    params_str = (my_data['MIN_ROWS'], my_data['MAX_ROWS'], my_data['MAX_EPI'], my_data['num_cores'])#
-    params = []
-    for x in params_str:
-        params.append(int(x)) if x != 'None' else params.append(None)
-
-    params_tag = map(str, params)
-    params_tag = '_'.join(params_tag)
-    tag = params_tag + date
-
-    return params, tag
-
-
-
 
 
 if __name__ == "__main__":
@@ -182,7 +59,7 @@ if __name__ == "__main__":
  
     run_options = {'1': "Get Object/Trajectories and Generate Graphs",
                    '2': "Unsupervised learning on feature space",
-                   '7': "Test"}
+                   '3': "Test"}
 
     sections = args.sections
     sections_dic={}
@@ -221,50 +98,42 @@ if __name__ == "__main__":
         my_data [key] = value
     date = my_data['date']
     qsr_params = (my_data['qsr'],my_data['q'],my_data['v'],my_data['n'])
-
-
-    rospy.loginfo("0. Running ROI query from geospatial_store")
-    gs = GeoSpatialStoreProxy('geospatial_store','soma')
-    ms = GeoSpatialStoreProxy('message_store','soma')
-    soma_map = 'uob_library'
-    soma_config = 'uob_lib_conf'
     config_path = '/home/strands/STRANDS/config.ini'
 
+
+    soma_map = 'uob_library'
+    soma_config = 'uob_lib_conf'
+    gs = GeoSpatialStoreProxy('geospatial_store','soma')
+    msg = GeoSpatialStoreProxy('message_store', 'soma')
+    rospy.loginfo("0. Running ROI query from geospatial_store")   
+
+    two_proxies = TwoProxies(gs, msg, soma_map, soma_config)
+    
     #*******************************************************************#
     #             Obtain ROI, Objects and Trajectories                  #
     #*******************************************************************#
     __out = False
-    all_objects={}
-
     for roi in gs.roi_ids(soma_map, soma_config):
         if '1' not in sections_dic: 
             continue
-
         if roi != '12':
             continue
 
         if __out: print 'ROI: ', gs.type_of_roi(roi, soma_map, soma_config), roi
-        geom = gs.geom_of_roi(roi, soma_map, soma_config)
-        
-        rospy.loginfo('1. Load trajectories in ROI')
-        res = gs.objs_within_roi(geom, soma_map, soma_config)
-        if res == None:
-            print "No Objects in this Region"            
-            continue
+        objects = two_proxies.roi_objects(roi)
 
-        objects_in_roi = {}
-        for i in res:
-            key = i['type'] +'_'+ i['soma_id']
-            objects_in_roi[key] = ms.obj_coords(i['soma_id'], soma_map, soma_config)
-            if __out: print key, objects_in_roi[key]
+        geom = two_proxies.gs.geom_of_roi(str(roi), soma_map, soma_config)
 
-        if __out: print "Number of objects in region = " + repr(len(objects_in_roi))
-        all_objects[roi] = objects_in_roi
+        if __out: print "  Number of objects in region = " + repr(len(objects))
+        if __out: print "geometry of region= ", geom
 
         query = '''{"loc": { "$geoWithin": { "$geometry": 
         { "type" : "Polygon", "coordinates" : %s }}}}''' %geom['coordinates']
+        
+        
+
         q = ot.query_trajectories(query)
-        trajectory_poses = q.trajs
+        trajectory_poses = q.trajs   #In xyz map coordinates
         
         if len(trajectory_poses)==0:
             print "No Trajectories in this Region"            
@@ -272,7 +141,7 @@ if __name__ == "__main__":
         else:
             print "number of unique traj returned = " + repr(len(trajectory_poses))
 
-        #objects_per_trajectory = ot.trajectory_object_dist(objects_in_roi, trajectory_poses)
+        #objects_per_trajectory = ot.trajectory_object_dist(objects, trajectory_poses)
    
         #LandMarks instead of Objects - need to select per ROI:
         #all_poses = list(itertools.chain.from_iterable(trajectory_poses.trajs.values()))
@@ -297,11 +166,11 @@ if __name__ == "__main__":
         if __out: raw_input("Press enter to continue")
 
         reader = Trajectory_Data_Reader(config_filename = config_path)
-        #keeper = Trajectory_QSR_Keeper(objects=objects_in_roi, \
-        #                    trajectories=trajectory_poses, reader=reader)
-        #keeper.save(base_data_dir)
+        keeper = Trajectory_QSR_Keeper(objects=objects, \
+                            trajectories=trajectory_poses, reader=reader)
+        keeper.save(base_data_dir)
         load_qsrs = 'all_qsrs_qtcb__0_01__False__True__03_03_2015.p'
-        keeper= Trajectory_QSR_Keeper(reader=reader, load_from_file = load_qsrs, dir=base_data_dir) 
+        #keeper= Trajectory_QSR_Keeper(reader=reader, load_from_file = load_qsrs, dir=base_data_dir) 
 
         #print keeper.reader.spatial_relations['7d638405-b2f8-55ce-b593-efa8e3f2ff2e'].trace[1].qsrs['Printer (photocopier)_5,trajectory'].qsr
 
@@ -328,10 +197,13 @@ if __name__ == "__main__":
         if __out: raw_input("Press enter to continue")
 
         params, tag = AG_setup(my_data, date)
+        print params
+        print tag
+
         activity_graph_dir = os.path.join(base_data_dir, 'AG_graphs/')
         if __out: print params, tag, activity_graph_dir
 
-        generate_graph_data(ep.all_episodes, activity_graph_dir, params)
+        generate_graph_data(ep.all_episodes, activity_graph_dir, params, tag)
         if __out: print "Activity Graphs Done"
 
 
@@ -347,7 +219,7 @@ if __name__ == "__main__":
     #                    Learn a Clustering model                  #
     #**************************************************************#
     if '2' in sections_dic:   
-        __out = True
+        __out = False
         rospy.loginfo('6. Learning on Feature Space')
 
         activity_graph_dir = os.path.join(base_data_dir, 'AG_graphs/')
@@ -357,17 +229,15 @@ if __name__ == "__main__":
 
         smartThing=Learning(f_space=X_source_U, c_book=cb, g_book=gb, vis=__out)
     
-        smartThing.kmeans() #Can pass k, or auto selects min(penalty)
+        smartThing.kmeans(k=2) #Can pass k, or auto selects min(penalty)
         smartThing.save(learning_area)
-        smartThing.load(learning_area, 'smartThing.p')
 
-
-    if '3' in sections_dic:  
-        smartThing=Learning(load_from_file='smartThing.p', dir = learning_area)
-
-
-
-
+    if '3' in sections_dic:
+        file_ = os.path.join(learning_area, 'smartThing.p')
+        print file_
+        smartThing = Learning(load_from_file=file_)
+        print dir(smartThing)
+        print smartThing.code_book
 
     sys.exit(1)
     logger.info('Running rospy.spin()')
