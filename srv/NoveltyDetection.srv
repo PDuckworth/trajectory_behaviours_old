@@ -2,5 +2,5 @@
 human_trajectory/Trajectory trajectory
 ---
 float64 spatial_dist
-float64 temp_nov
-float64 overall_nov
+float64[] temporal_nov
+float64 roi_knowledge

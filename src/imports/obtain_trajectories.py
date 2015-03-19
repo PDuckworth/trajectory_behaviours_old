@@ -144,8 +144,11 @@ class query_trajectories():
 
     def get_poses(self):
         self.trajs = {}
+        self.trajectory_times = []
+
         for trajectory in self.res.trajectories.trajectories:
-            self.trajs[trajectory.uuid] = []        
+            self.trajs[trajectory.uuid] = []          
+            self.trajectory_times.append(trajectory.start_time.secs) # Temporal Info
             for entry in trajectory.trajectory:
                 x=entry.pose.position.x
                 y=entry.pose.position.y

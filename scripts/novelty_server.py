@@ -2,6 +2,7 @@
 import sys
 import os
 import rospy
+import time
 import itertools
 from scipy.spatial import distance
 import cPickle as pickle
@@ -12,6 +13,8 @@ import imports.obtain_trajectories as ot
 import novelTrajectories.traj_data_reader as tdr
 import imports.graphs_handler as gh
 import imports.learningArea as la
+
+from time_analysis.cyclic_processes import *
 
 def get_poses(trajectory_message):
 
@@ -33,23 +36,27 @@ def handle_novelty_detection(req):
             7. Calculate distance to cluster centers
             8. Give a score based on distance (divided by number of clusters?)
     """
+    t0=time.time()
     data_dir='/home/strands/STRANDS/'
 
     """1. Trajectory Message"""
     uuid = req.trajectory.uuid
+    start_time = req.trajectory.start_time.secs
     print "1. Analysing trajectory: %s" %uuid
     trajectory_poses = {uuid : get_poses(req.trajectory)}
-    print "    Trajectory: ", trajectory_poses[uuid] 
+    print "    Trajectory: ", trajectory_poses[uuid]
     
 
     """2. Region and Objects"""  
     soma_map = 'uob_library'
     soma_config = 'uob_lib_conf'
-    gs = GeoSpatialStoreProxy('geospatial_store','soma')
+    gs = GeoSpatialStoreProxy('geospatial_store', 'soma')
     msg = GeoSpatialStoreProxy('message_store', 'soma')
     two_proxies = TwoProxies(gs, msg, soma_map, soma_config)
 
-    roi = two_proxies.trajectory_roi(req.trajectory.uuid)
+    """THIS USES GEO_STORE - UPDATE TO CONVERT TRAJECTORY.POSES INTO LONG/LAT INSTEAD"""
+
+    roi = two_proxies.trajectory_roi(req.trajectory.uuid, trajectory_poses[uuid])
     objects = two_proxies.roi_objects(roi)
     print "\n  ROI: ", roi
     print "\n  Objects: ", objects
@@ -88,33 +95,51 @@ def handle_novelty_detection(req):
 
 
     """5. Load spatial model"""
-    print "\n  LEARNT MODEL :"
-    file_ = os.path.join(data_dir + 'learning/smartThing.p')
+    print "\n  MODELS LOADED :"
+    file_ = os.path.join(data_dir + 'learning/roi_' + roi + '_smartThing.p')
     smartThing=la.Learning(load_from_file=file_)
     print smartThing.methods
     print smartThing.code_book
-    print "\n  GRAPHLET: \n", smartThing.graphlet_book[0].graph
+    #print "\n  GRAPHLET: \n", smartThing.graphlet_book[0].graph
     
     """6. Create Feature Vector""" 
     test_histogram = activity_graphs[episodes_file].get_histogram(smartThing.code_book)
-    print test_histogram
+    print "HISTOGRAM = ", test_histogram
     
     """7. Calculate Distance to clusters"""
     estimator = smartThing.methods['kmeans']
-    print estimator.inertia_
-    print estimator.cluster_centers_
+    print "INERTIA = ", estimator.inertia_
+    print "CLUSTER CENTERS = ", estimator.cluster_centers_
     
     closest_cluster = estimator.predict(test_histogram)
     a = test_histogram   
     b = estimator.cluster_centers_[closest_cluster]
     dst = distance.euclidean(a,b)
-    print dst
-
+    print "\nDISTANCE = ", dst
     ret=NoveltyDetectionResponse()
-    ret.spatial_dist = dst
-    ret.temp_nov = 1.0
-    ret.overall_nov = 1.0
+ 
+
+    """8. Time Analysis"""
+    fitting = smartThing.methods['time_fitting']
+    dyn_cl = smartThing.methods['time_dyn_clst']
+
+    model = fitting.models[np.argmin(fitting.bic)]
+    pc = dyn_cl.query_clusters(start_time%86400)
+    pf = fitting.query_model(start_time%86400)
     
+    print "PC = ", pc
+    print "PF = ", pf
+
+
+    """9. ROI Knowledge"""
+    knowledge = smartThing.methods['roi_knowledge'][roi]
+ 
+
+    ret.spatial_dist = dst
+    ret.temporal_nov = [pc, pf]
+    ret.roi_knowledge = knowledge
+
+    print "Service took: ", time.time()-t0, "  secs."
     return ret
 
 
@@ -122,6 +147,7 @@ def handle_novelty_detection(req):
 
 def calculate_novelty():
     rospy.init_node('novelty_server')
+
                         #service_name       #serive_type       #handler_function
     s = rospy.Service('novelty_detection', NoveltyDetection, handle_novelty_detection)  
     print "Ready to detect novelty..."

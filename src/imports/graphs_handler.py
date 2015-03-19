@@ -14,15 +14,15 @@ from imports.Activity_Graph import Activity_Graph
 
 
 
-def AG_setup(my_data, date):
-    params_str = (my_data['MIN_ROWS'], my_data['MAX_ROWS'], my_data['MAX_EPI'], my_data['num_cores'])
+def AG_setup(input_data, date, roi):
+    params_str = (input_data['MIN_ROWS'], input_data['MAX_ROWS'], input_data['MAX_EPI'], input_data['num_cores'])
     params = []
     for x in params_str:
         params.append(int(x)) if x != 'None' else params.append(None)
 
     params_tag = map(str, params)
     params_tag = '_'.join(params_tag)
-    tag = params_tag + date
+    tag = roi +'_'+ params_tag + date
 
     return params, tag
 
@@ -79,7 +79,6 @@ def graph_check(gr, ep_file):
 
 def generate_feature_space(data_dir, tag, __out=False):
     
-
     AG_out_file = os.path.join(data_dir + 'activity_graphs_' + tag + '.p')
     activity_graphs = pickle.load(open(AG_out_file))
     

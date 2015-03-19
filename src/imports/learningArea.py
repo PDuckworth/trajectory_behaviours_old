@@ -5,7 +5,7 @@
 __author__      = "Paul Duckworth"
 __copyright__   = "Copyright 2015, University of Leeds"
 
-import os
+import os, sys
 import rospy
 import time
 import math
@@ -19,6 +19,10 @@ from sklearn.datasets import load_digits
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
+from soma_geospatial_store.geospatial_store import *
+from tf.transformations import euler_from_quaternion
+
+from time_analysis.cyclic_processes import *
 
 class Learning():
     '''
@@ -26,23 +30,30 @@ class Learning():
     Accepts a feature space, where rows are instances, and columns are features.
     '''
 
-    def __init__(self, f_space = [[]], c_book=[], g_book=[], vis=False, \
-                   load_from_file=None):
+    def __init__(self, f_space=None, roi="",
+                    vis=False, load_from_file=None):
 
         if load_from_file is not None and load_from_file != "":
             self.load(load_from_file)
         else:
-            self.feature_space  = f_space
-            self.code_book = c_book
-            self.graphlet_book = g_book
-            self.methods = {}
-            self.visualise = vis
 
+            (self.code_book, self.graphlet_book, \
+                      self.feature_space) = f_space
+            self.methods = {}
+            self.roi = roi
+            self.visualise = vis
+            self.roi_knowledge = {}
+            self.roi_temp_list = {}
+            self.roi_temp_know = {}
 
     def save(self, dir):
         print("Saving...")
-        foo = {"feature_space": self.feature_space, "code_book": self.code_book, "graphlet_book": self.graphlet_book, "learning_methods": self.methods}
-        filename  = os.path.join(dir, 'smartThing.p')
+        print self.roi
+        filename = os.path.join(dir, self.roi + '_smartThing.p')
+
+        foo = { "ROI": self.roi, "feature_space": self.feature_space, \
+                "code_book": self.code_book, "graphlet_book": self.graphlet_book, \
+                "learning_methods": self.methods}
         print(filename)
         with open(filename, "wb") as f:
             pickle.dump(foo, f)
@@ -53,11 +64,11 @@ class Learning():
         print("Loading QSRs from", filename)
         with open(filename, "rb") as f:
             foo = pickle.load(f)
+        self.roi = foo["ROI"]
         self.methods = foo["learning_methods"]
         self.code_book = foo["code_book"]
         self.graphlet_book = foo["graphlet_book"]
         self.feature_space = foo["feature_space"]
-
         print "Loaded: " + repr(self.methods)
         print("success")
 
@@ -69,7 +80,6 @@ class Learning():
         #scaler.fit(X)
         #X_s = scaler.transform(X)        
         data = X #_s
-
         if k!=None:
             (estimator, penalty) = self.kmeans_util(data, k=k)
 
@@ -90,7 +100,6 @@ class Learning():
         self.methods["kmeans"] = estimator
         if self.visualise: plot_pca(data, k)
         rospy.loginfo('6. Done')
-
 
 
     def kmeans_util(self, data, k=None):
@@ -127,7 +136,100 @@ class Learning():
 
          
 
+    def time_analysis(self, timestamps_vec, interval=1800):
+
+        dyn_cl = dynamic_clusters()
+        for t in range(len(timestamps_vec)):
+            dyn_cl.add_element(t+1,timestamps_vec[t])
+        fitting = activity_time(timestamps_vec, interval=interval)
         
+        #plot_options: title, hist_colour, curve_colour
+        #stop = fitting.display_indexes(['trajectories','g','b'],dyn_cl,[]) 
+        self.methods["time_dyn_clst"] = dyn_cl
+        self.methods["time_fitting"] = fitting
+
+    def region_knowledge(self, map, config, \
+                        interval=3600.0, period = 86400.0):
+        """Returns the ROIs the robot can montitor at each pose"""
+        t0 = time.time()
+        n_bins = int(period/interval)
+
+        gs = GeoSpatialStoreProxy('geospatial_store','soma')
+        ns = GeoSpatialStoreProxy('message_store','monitored_nav_events')
+        twoproxies = TwoProxies(gs, ns, map, config)
+
+        query = {"_id": {"$exists": "true"}}     
+        for p in twoproxies.msg.find(query):
+            timepoint = p['event_start_time']['secs']
+            pose = p['event_start_pose']['position']
+            ro, pi, yaw = euler_from_quaternion([0, 0, \
+                    p['event_start_pose']['orientation']['z'], \
+                    p['event_start_pose']['orientation']['w'] ])
+       
+            coords = robot_view_cone(pose['x'], pose['y'], yaw)
+            lnglat = []
+            for pt in coords:
+                lnglat.append(twoproxies.gs.coords_to_lnglat(pt[0], pt[1]))
+            lnglat.append(twoproxies.gs.coords_to_lnglat(\
+                            coords[0][0], coords[0][1]))
+
+            regions = []           
+            for i in twoproxies.gs.observed_roi(lnglat, map, config):
+                if i['soma_roi_id'] in self.roi_knowledge:
+                    self.roi_knowledge[i['soma_roi_id']]+=1
+                    self.roi_temp_list[i['soma_roi_id']].append(timepoint)
+                else:
+                    self.roi_knowledge[i['soma_roi_id']]=1
+                    self.roi_temp_list[i['soma_roi_id']]=[timepoint]
+
+        
+        for roi in self.roi_temp_list:
+            view_ts, ind = time_wrap(self.roi_temp_list[roi])
+            t = binning(view_ts, n_bins, interval)
+            self.roi_temp_know[roi] = [float(k)/max(t) for k in t]
+            #print self.roi_temp_know[roi]
+
+        self.methods["roi_knowledge"] = self.roi_knowledge
+        self.methods["roi_knowledge"] = self.roi_temp_know
+
+        print "Knowledge of Regions takes: ", time.time()-t0, "  secs."
+
+    
+    def time_plot(timestamps_vec, knowledge, interval=3600, period=86400, \
+                        vis=False):
+        pc = []
+        pf = []
+        print timestamps_vec
+        print type(timestamps_vec)
+
+        for v in timestamps_vec:
+            pc.append(self.methods["time_dyn_clst"].query_clusters(v))
+            pf.append(self.methods["time_fitting"].query_model(v))
+
+        plt.plot(timestamps_vec,pc,label='dynamic clustering')
+        plt.plot(timestamps_vec,pf,label='GMM fitting')
+        plt.plot(np.arange(0,period+1,interval), knowledge, label='knowledge')
+        plt.xlabel('samples')
+        plt.ylabel('probability')
+        plt.legend()
+        plt.savefig('/home/strands/STRANDS/learning/roi12.jpg', \
+                bbox_inches='tight', dpi=100)
+
+
+    
+def robot_view_cone( Px, Py, yaw):
+    """ let's call the triangle PLR, where P is the robot pose, 
+        L the left vertex, R the right vertex"""
+    d = 4 # max monitored distance: reasonably not more than 3.5-4m
+    alpha = 1 # field of view: 57 deg kinect, 58 xtion, we can use exactly 1 rad (=57.3 deg)
+    Lx = Px + d * (math.cos((yaw-alpha)/2))
+    Ly = Py + d * (math.cos((yaw-alpha)/2))
+    Rx = Px + d * (math.cos((yaw+alpha)/2))
+    Ry = Py + d * (math.cos((yaw+alpha)/2))
+    return [ [Lx, Ly], [Rx, Ry], [Px, Py] ]
+
+
+
 def plot_pca(data, k):
     ###############################################################################
     # Visualize the results on PCA-reduced data

@@ -18,7 +18,7 @@ import pyrr
 from scipy import spatial
 import cPickle as pickle
 
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import Pose, Quaternion
 from human_trajectory.msg import Trajectory, Trajectories
 from soma_trajectory.srv import TrajectoryQuery, TrajectoryQueryRequest, TrajectoryQueryResponse
 from soma_geospatial_store.geospatial_store import *
@@ -27,9 +27,6 @@ import imports.obtain_trajectories as ot
 from imports.graphs_handler import *
 from novelTrajectories.traj_data_reader import *
 from imports.learningArea import Learning
-
-
-
 
 def check_dir(directory):
     if not os.path.isdir(directory):
@@ -53,96 +50,72 @@ if __name__ == "__main__":
     global __out
     rospy.init_node("trajectory_learner")
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("sections", help="chose what section of code to run", type=str)
-    args = parser.parse_args()
- 
-    run_options = {'1': "Get Object/Trajectories and Generate Graphs",
-                   '2': "Unsupervised learning on feature space",
-                   '3': "Test"}
-
-    sections = args.sections
-    sections_dic={}
-
-    try:
-        print "\n************************************************"
-        for i in sections:
-            if i not in (" ",","): sections_dic[i] = run_options[i]
-        sections=sections_dic.keys()
-        sections.sort()
-        for key in sections:
-            print "Selected: " + repr(key) + ". Running: " + repr(sections_dic[key])
-        print "************************************************"
-    except KeyError:
-        print("Run Option not found")
-        print "************************************************"
-        print "Current working selection: "
-        keys=sections_dic.keys()
-        keys.sort()
-        for key in keys:
-            print "Selected: " + repr(key) + ". Running: " + repr(sections_dic[key])
-        print "************************************************"
-        sys.exit(1)
-    
     user = getpass.getuser()
     base_data_dir = os.path.join('/home/' + user + '/STRANDS/')
     learning_area = os.path.join(base_data_dir, 'learning/')
-    options_file = os.path.join(base_data_dir + 'options.txt')
 
-    my_data = {}
-    gen = (line for line in open(options_file) if line[0] != '#')
-    for line in gen:
-        line = line.replace('=', ' ').replace('\n', '')
-        var, value = line.split(' ')
-        key = var
-        my_data [key] = value
-    date = my_data['date']
-    qsr_params = (my_data['qsr'],my_data['q'],my_data['v'],my_data['n'])
-    config_path = '/home/strands/STRANDS/config.ini'
-
+    config_file = os.path.join(base_data_dir + 'config.ini')
+    config_parser = ConfigParser.SafeConfigParser()
+    print(config_parser.read(config_file))
+    if len(config_parser.read(config_file)) == 0:
+        raise ValueError("Options file not found, please provide a config.ini file as described in the documentation")
+    config_section = "activity_graph_options"
+    try:
+        input_data={}
+        date = config_parser.get(config_section, "date")
+        input_data['MAX_ROWS'] = config_parser.get(config_section, "MAX_ROWS")
+        input_data['MIN_ROWS'] = config_parser.get(config_section, "MIN_ROWS")
+        input_data['MAX_EPI']  = config_parser.get(config_section, "MAX_EPI")
+        input_data['num_cores'] = config_parser.get(config_section, "num_cores")
+        #print input_data
+    except ConfigParser.NoOptionError:
+        raise    
 
     soma_map = 'uob_library'
     soma_config = 'uob_lib_conf'
     gs = GeoSpatialStoreProxy('geospatial_store','soma')
     msg = GeoSpatialStoreProxy('message_store', 'soma')
     rospy.loginfo("0. Running ROI query from geospatial_store")   
-
-    two_proxies = TwoProxies(gs, msg, soma_map, soma_config)
     
+  
     #*******************************************************************#
     #             Obtain ROI, Objects and Trajectories                  #
     #*******************************************************************#
-    __out = False
+    __out = True
+    roi_timepoints = {}
+    roi_cnt = 0
+    two_proxies = TwoProxies(gs, msg, soma_map, soma_config)
     for roi in gs.roi_ids(soma_map, soma_config):
-        if '1' not in sections_dic: 
-            continue
-        if roi != '12':
-            continue
+
+        str_roi = "roi_%s" % roi
+        if roi != '12': continue
 
         if __out: print 'ROI: ', gs.type_of_roi(roi, soma_map, soma_config), roi
+
         objects = two_proxies.roi_objects(roi)
+        if objects == None: continue
 
         geom = two_proxies.gs.geom_of_roi(str(roi), soma_map, soma_config)
-
-        if __out: print "  Number of objects in region = " + repr(len(objects))
-        if __out: print "geometry of region= ", geom
+        if __out: print "  Number of objects in region =  " + repr(len(objects))
+        if __out: print "  geometry of region= ", geom
 
         query = '''{"loc": { "$geoWithin": { "$geometry": 
         { "type" : "Polygon", "coordinates" : %s }}}}''' %geom['coordinates']
         
-        
+        #query = '''{"loc": { "$geoIntersects": { "$geometry": 
+        #{ "type" : "Polygon", "coordinates" : %s }}}}''' %geom['coordinates']
 
         q = ot.query_trajectories(query)
-        trajectory_poses = q.trajs   #In xyz map coordinates
-        
-        if len(trajectory_poses)==0:
+        #roi_timepoints[str_roi] = q.trajectory_times #for Eris and debug
+ 
+        if len(q.trajs)==0:
             print "No Trajectories in this Region"            
             continue
         else:
-            print "number of unique traj returned = " + repr(len(trajectory_poses))
+            print " number of unique traj returned = " + repr(len(q.trajs))
 
         #objects_per_trajectory = ot.trajectory_object_dist(objects, trajectory_poses)
-   
+
         #LandMarks instead of Objects - need to select per ROI:
         #all_poses = list(itertools.chain.from_iterable(trajectory_poses.trajs.values()))
         #if __out: print "number of poses in total = " +repr(len(all_poses))
@@ -156,7 +129,6 @@ if __name__ == "__main__":
         #object_poses = pins.poses_landmarks
 
 
-
     #**************************************************************#
     #          Apply QSR Lib to Objects and Trajectories           #
     #**************************************************************#
@@ -165,11 +137,11 @@ if __name__ == "__main__":
         rospy.loginfo('2. Apply QSR Lib')
         if __out: raw_input("Press enter to continue")
 
-        reader = Trajectory_Data_Reader(config_filename = config_path)
-        keeper = Trajectory_QSR_Keeper(objects=objects, \
-                            trajectories=trajectory_poses, reader=reader)
+        reader = Trajectory_Data_Reader(config_filename = config_file, roi=str_roi)
+        keeper = Trajectory_QSR_Keeper(objects=objects, 
+                            trajectories=q.trajs, reader=reader)
         keeper.save(base_data_dir)
-        load_qsrs = 'all_qsrs_qtcb__0_01__False__True__03_03_2015.p'
+        #load_qsrs = 'roi_12_qsrs_qtcb__0_01__False__True__03_03_2015.p'
         #keeper= Trajectory_QSR_Keeper(reader=reader, load_from_file = load_qsrs, dir=base_data_dir) 
 
         #print keeper.reader.spatial_relations['7d638405-b2f8-55ce-b593-efa8e3f2ff2e'].trace[1].qsrs['Printer (photocopier)_5,trajectory'].qsr
@@ -188,6 +160,7 @@ if __name__ == "__main__":
         ep.save(base_data_dir)
         if __out: print "episode test: " + repr(ep.all_episodes['5c02e156-493d-55bc-ad21-a4be1d9f95aa__1__22'])
 
+
     #**************************************************************#
     #            Activity Graphs/Code_book/Histograms              #
     #**************************************************************#
@@ -196,10 +169,7 @@ if __name__ == "__main__":
         rospy.loginfo('4. Generating Activity Graphs')
         if __out: raw_input("Press enter to continue")
 
-        params, tag = AG_setup(my_data, date)
-        print params
-        print tag
-
+        params, tag = AG_setup(input_data, date, str_roi)
         activity_graph_dir = os.path.join(base_data_dir, 'AG_graphs/')
         if __out: print params, tag, activity_graph_dir
 
@@ -210,35 +180,51 @@ if __name__ == "__main__":
     #**************************************************************#
     #           Generate Feature Space from Histograms             #
     #**************************************************************#     
+        __out = False
         rospy.loginfo('5. Generating Feature Space')
         if __out: raw_input("Press enter to continue")
+        #feature_space is now a tuple
         feature_space = generate_feature_space(activity_graph_dir, tag)
-            
         
     #**************************************************************#
     #                    Learn a Clustering model                  #
     #**************************************************************#
-    if '2' in sections_dic:   
         __out = False
         rospy.loginfo('6. Learning on Feature Space')
+        params, tag = AG_setup(input_data, date, str_roi)
 
-        activity_graph_dir = os.path.join(base_data_dir, 'AG_graphs/')
-        feature_space = pickle.load(open(os.path.join(activity_graph_dir, \
-                        'feature_space_None_1_3_4__19_02_2015.p')))
-        (cb, gb, X_source_U) = feature_space
-
-        smartThing=Learning(f_space=X_source_U, c_book=cb, g_book=gb, vis=__out)
-    
+        smartThing=Learning(f_space=feature_space, roi=str_roi, vis=__out)
         smartThing.kmeans(k=2) #Can pass k, or auto selects min(penalty)
+        
+
+    #*******************************************************************#
+    #                    Region Knowledge                               #
+    #*******************************************************************#
+        #Only learn ROI Knowledge once for all regions. 
+        if roi_cnt==0: 
+            smartThing.region_knowledge(soma_map, soma_config)
+            roi_knowledge = smartThing.methods["roi_knowledge"]
+        else:
+            smartThing.methods["roi_knowledge"] = roi_knowledge
+
+
+    #*******************************************************************#
+    #                    Temporal Analysis                              #
+    #*******************************************************************#
+        smartThing.time_analysis(q.trajectory_times)
+   
+        #print roi_knowledge[roi]
+        #smartThing.time_plot(q.trajectory_times, roi_knowledge[roi], vis=True)
+        
         smartThing.save(learning_area)
 
-    if '3' in sections_dic:
-        file_ = os.path.join(learning_area, 'smartThing.p')
-        print file_
-        smartThing = Learning(load_from_file=file_)
-        print dir(smartThing)
-        print smartThing.code_book
+        for key in smartThing.methods:
+            print "\nLearnt: ", key
+            print smartThing.methods[key]
+  
+        roi_cnt+=1
 
+       
     sys.exit(1)
     logger.info('Running rospy.spin()')
     rospy.spin()
