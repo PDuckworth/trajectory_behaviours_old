@@ -37,7 +37,7 @@ def handle_novelty_detection(req):
             8. Give a score based on distance (divided by number of clusters?)
     """
     t0=time.time()
-    data_dir='/home/fxj345/paul/STRANDS/'
+    data_dir='/home/strands/paul/STRANDS/'
 
     """1. Trajectory Message"""
     uuid = req.trajectory.uuid
@@ -48,8 +48,8 @@ def handle_novelty_detection(req):
     
 
     """2. Region and Objects"""  
-    soma_map = 'uob_library'
-    soma_config = 'uob_lib_conf'
+    soma_map = 'cs_lg'
+    soma_config = 'friday_config'
     gs = GeoSpatialStoreProxy('geospatial_store', 'soma')
     msg = GeoSpatialStoreProxy('message_store', 'soma')
     two_proxies = TwoProxies(gs, msg, soma_map, soma_config)
@@ -64,7 +64,6 @@ def handle_novelty_detection(req):
 
     """3. QSRLib data parser"""
     config_path = os.path.join(data_dir, 'config.ini')
-    print config_path
     reader = tdr.Trajectory_Data_Reader(config_filename = config_path)
     keeper = tdr.Trajectory_QSR_Keeper(objects=objects, \
                         trajectories=trajectory_poses, reader=reader)
@@ -117,7 +116,6 @@ def handle_novelty_detection(req):
     b = estimator.cluster_centers_[closest_cluster]
     dst = distance.euclidean(a,b)
     print "\nDISTANCE = ", dst
-    ret=NoveltyDetectionResponse()
  
 
     """8. Time Analysis"""
@@ -134,15 +132,10 @@ def handle_novelty_detection(req):
 
     """9. ROI Knowledge"""
     knowledge = smartThing.methods['roi_knowledge'][roi]
- 
-
-    ret.spatial_dist = dst
-    ret.temporal_nov = [pc, pf]
-    ret.roi_knowledge = knowledge
+    print "Knowledge of region = ", knowledge
 
     print "Service took: ", time.time()-t0, "  secs."
-    return ret
-
+    return NoveltyDetectionResponse(dst, [pc, pf], knowledge)
 
 
 
@@ -150,7 +143,7 @@ def calculate_novelty():
     rospy.init_node('novelty_server')
 
                         #service_name       #serive_type       #handler_function
-    s = rospy.Service('novelty_detection', NoveltyDetection, handle_novelty_detection)  
+    s = rospy.Service('/novelty_detection', NoveltyDetection, handle_novelty_detection)  
     print "Ready to detect novelty..."
     rospy.spin()
 
