@@ -37,7 +37,7 @@ def handle_novelty_detection(req):
             8. Give a score based on distance (divided by number of clusters?)
     """
     t0=time.time()
-    data_dir='/home/strands/STRANDS/'
+    data_dir='/home/fxj345/paul/STRANDS/'
 
     """1. Trajectory Message"""
     uuid = req.trajectory.uuid
@@ -54,7 +54,7 @@ def handle_novelty_detection(req):
     msg = GeoSpatialStoreProxy('message_store', 'soma')
     two_proxies = TwoProxies(gs, msg, soma_map, soma_config)
 
-    """THIS USES GEO_STORE - UPDATE TO CONVERT TRAJECTORY.POSES INTO LONG/LAT INSTEAD"""
+
 
     roi = two_proxies.trajectory_roi(req.trajectory.uuid, trajectory_poses[uuid])
     objects = two_proxies.roi_objects(roi)
@@ -63,7 +63,8 @@ def handle_novelty_detection(req):
 
 
     """3. QSRLib data parser"""
-    config_path = '/home/strands/STRANDS/config.ini'
+    config_path = os.path.join(data_dir, 'config.ini')
+    print config_path
     reader = tdr.Trajectory_Data_Reader(config_filename = config_path)
     keeper = tdr.Trajectory_QSR_Keeper(objects=objects, \
                         trajectories=trajectory_poses, reader=reader)

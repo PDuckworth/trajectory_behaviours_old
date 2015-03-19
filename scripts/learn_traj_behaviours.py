@@ -14,7 +14,6 @@ import itertools
 import getpass
 
 import numpy as np
-import pyrr
 from scipy import spatial
 import cPickle as pickle
 
@@ -51,10 +50,17 @@ if __name__ == "__main__":
     rospy.init_node("trajectory_learner")
 
     user = getpass.getuser()
-    base_data_dir = os.path.join('/home/' + user + '/STRANDS/')
+    base_data_dir = os.path.join('/home/' + user + '/paul/STRANDS/')
+    check_dir(base_data_dir)
+    check_dir(os.path.join('/home/' + user + '/paul/STRANDS/qsr_dump/'))
+    check_dir(os.path.join('/home/' + user + '/paul/STRANDS/episodes_dump/'))
+    check_dir(os.path.join('/home/' + user + '/paul/STRANDS/AG_graphs/'))
     learning_area = os.path.join(base_data_dir, 'learning/')
-
+    check_dir(learning_area)
+    
+	
     config_file = os.path.join(base_data_dir + 'config.ini')
+    print config_file
     config_parser = ConfigParser.SafeConfigParser()
     print(config_parser.read(config_file))
     if len(config_parser.read(config_file)) == 0:
@@ -98,13 +104,12 @@ if __name__ == "__main__":
         geom = two_proxies.gs.geom_of_roi(str(roi), soma_map, soma_config)
         if __out: print "  Number of objects in region =  " + repr(len(objects))
         if __out: print "  geometry of region= ", geom
-
+	
         query = '''{"loc": { "$geoWithin": { "$geometry": 
         { "type" : "Polygon", "coordinates" : %s }}}}''' %geom['coordinates']
-        
+        print query
         #query = '''{"loc": { "$geoIntersects": { "$geometry": 
         #{ "type" : "Polygon", "coordinates" : %s }}}}''' %geom['coordinates']
-
         q = ot.query_trajectories(query)
         #roi_timepoints[str_roi] = q.trajectory_times #for Eris and debug
  
