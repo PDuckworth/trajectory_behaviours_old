@@ -3,16 +3,17 @@ import sys
 import os
 import rospy
 import time
+from datetime import datetime
 import itertools
 from scipy.spatial import distance
 import cPickle as pickle
 from relational_learner.srv import *
 from soma_geospatial_store.geospatial_store import * 
 
-import imports.obtain_trajectories as ot
+import relational_learner.obtain_trajectories as ot
 import novelTrajectories.traj_data_reader as tdr
-import imports.graphs_handler as gh
-import imports.learningArea as la
+import relational_learner.graphs_handler as gh
+import relational_learner.learningArea as la
 
 from time_analysis.cyclic_processes import *
 
@@ -133,10 +134,11 @@ def handle_novelty_detection(req):
     """9. ROI Knowledge"""
     knowledge = smartThing.methods['roi_knowledge'][roi]
     print "Knowledge of region = ", knowledge
+    t = datetime.fromtimestamp(start_time)
+    th = knowledge[t.hour]
 
     print "Service took: ", time.time()-t0, "  secs."
-    return NoveltyDetectionResponse(dst, [pc, pf], knowledge)
-
+    return NoveltyDetectionResponse(dst, [pc, pf], th)
 
 
 def calculate_novelty():

@@ -12,6 +12,7 @@ import math
 import cPickle as pickle
 import numpy as np
 import matplotlib.pyplot as plt
+from relational_learner.Activity_Graph import Activity_Graph
 
 from sklearn import metrics
 from sklearn.cluster import KMeans

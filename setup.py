@@ -5,8 +5,8 @@ from catkin_pkg.python_setup import generate_distutils_setup
 
 d = generate_distutils_setup(
     # #  don't do this unless you want a globally visible script
-    # scripts=['bin/myscript'],
-    packages=['imports'],
+    scripts=['scripts/learn_traj_behaviours.py'],
+    packages=['relational_learner'],
     package_dir={'': 'src'}
 )
 

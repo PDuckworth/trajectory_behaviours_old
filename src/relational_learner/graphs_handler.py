@@ -10,7 +10,7 @@ import os, sys, time
 import itertools
 import cPickle as pickle
 import numpy as np
-from imports.Activity_Graph import Activity_Graph
+from relational_learner.Activity_Graph import Activity_Graph
 
 
 
