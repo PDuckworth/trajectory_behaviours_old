@@ -61,12 +61,13 @@ def run_all():
     learning_area = os.path.join(base_data_dir, 'learning/')
     check_dir(learning_area)
 
-    config_file = os.path.join(base_data_dir + 'config.ini')
-    print config_file
-
+    path = os.path.dirname(os.path.realpath(__file__))
+    if path.endswith("/scripts"): 
+        config_path = path.replace("/scripts", "/config.ini") 
     config_parser = ConfigParser.SafeConfigParser()
-    print(config_parser.read(config_file))
-    if len(config_parser.read(config_file)) == 0:
+    print(config_parser.read(config_path))
+
+    if len(config_parser.read(config_path)) == 0:
         raise ValueError("Options file not found, please provide a config.ini file as described in the documentation")
     config_section = "activity_graph_options"
     try:
@@ -145,7 +146,7 @@ def run_all():
         rospy.loginfo('2. Apply QSR Lib')
         if __out: raw_input("Press enter to continue")
 
-        reader = Trajectory_Data_Reader(config_filename = config_file, roi=str_roi)
+        reader = Trajectory_Data_Reader(config_filename = config_path, roi=str_roi)
         keeper = Trajectory_QSR_Keeper(objects=objects, 
                             trajectories=q.trajs, reader=reader)
         keeper.save(base_data_dir)
