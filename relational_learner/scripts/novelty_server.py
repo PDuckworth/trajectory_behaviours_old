@@ -3,22 +3,54 @@ import sys
 import os
 import rospy
 import time
+import getpass
+import ConfigParser
 from datetime import datetime
 import itertools
 from scipy.spatial import distance
 import cPickle as pickle
 from relational_learner.srv import *
 from soma_geospatial_store.geospatial_store import * 
-
+from relational_learner.Activity_Graph import Activity_Graph
 import relational_learner.obtain_trajectories as ot
 import novelTrajectories.traj_data_reader as tdr
 import relational_learner.graphs_handler as gh
 import relational_learner.learningArea as la
-
 from time_analysis.cyclic_processes import *
 
-def get_poses(trajectory_message):
 
+class stitch_uuids(object):
+    def __init__(self):
+        self.uuid = ""
+        self.stored_qsrs = []
+        self.all_uuids = []
+
+    def merge_qsr_worlds(self, uuid, data_reader):
+        """Merges together trajectories which are published 
+           with the same UUID. Merge after QSRs have been generated."""
+        #If new UUID        
+        if self.uuid != uuid:
+            self.uuid = uuid
+            #Initial QSRs of tractories:
+            self.stored_qsrs = data_reader.spatial_relations[uuid].trace
+            self.all_uuids.append(uuid)
+            return data_reader
+        #If same as previous UUID
+        else:
+            print "QSRs Stitched together"
+            #print "NEW = ", reader.spatial_relations[uuid].trace
+            #print "STORED = ", self.stored_qsrs
+            len_of_stored = len(self.stored_qsrs)
+            #print len_of_stored
+            for (key,pose) in data_reader.spatial_relations[uuid].trace.items():
+                self.stored_qsrs[key+len_of_stored] = pose
+            #print self.stored_qsrs  #QSRs stitched together
+            data_reader.spatial_relations[uuid].trace = self.stored_qsrs
+            return data_reader
+
+
+
+def get_poses(trajectory_message):
     traj = []    
     for entry in trajectory_message.trajectory:
         x=entry.pose.position.x
@@ -28,6 +60,8 @@ def get_poses(trajectory_message):
     return traj
 
 def handle_novelty_detection(req):
+    print stitching.uuid
+
     """     1. Take the trajectory as input
             2. Query mongodb for the region and objects
             3. Pass to strands to QSRLib data parser
@@ -38,24 +72,37 @@ def handle_novelty_detection(req):
             8. Give a score based on distance (divided by number of clusters?)
     """
     t0=time.time()
-    data_dir='/home/strands/paul/STRANDS/'
+    user = getpass.getuser()
+    data_dir = os.path.join('/home/' + user + '/STRANDS/')
+
+    path = os.path.dirname(os.path.realpath(__file__))
+    if path.endswith("/scripts"): 
+        config_path = path.replace("/scripts", "/config.ini") 
+    config_parser = ConfigParser.SafeConfigParser()
+    print(config_parser.read(config_path))
+
+    if len(config_parser.read(config_path)) == 0:
+        raise ValueError("Config file not found, please provide a config.ini file as described in the documentation")
+    config_section = "soma" 
+    try:
+ 
+        soma_map = config_parser.get(config_section, "soma_map")
+        soma_config = config_parser.get(config_section, "soma_config")
+    except ConfigParser.NoOptionError:
+         raise  
 
     """1. Trajectory Message"""
     uuid = req.trajectory.uuid
     start_time = req.trajectory.start_time.secs
     print "1. Analysing trajectory: %s" %uuid
     trajectory_poses = {uuid : get_poses(req.trajectory)}
-    print "    Trajectory: ", trajectory_poses[uuid]
-    
+    print "LENGTH of Trajectory: ", len(trajectory_poses[uuid])
+
 
     """2. Region and Objects"""  
-    soma_map = 'cs_lg'
-    soma_config = 'friday_config'
     gs = GeoSpatialStoreProxy('geospatial_store', 'soma')
     msg = GeoSpatialStoreProxy('message_store', 'soma')
     two_proxies = TwoProxies(gs, msg, soma_map, soma_config)
-
-
 
     roi = two_proxies.trajectory_roi(req.trajectory.uuid, trajectory_poses[uuid])
     objects = two_proxies.roi_objects(roi)
@@ -64,14 +111,19 @@ def handle_novelty_detection(req):
 
 
     """3. QSRLib data parser"""
-    config_path = os.path.join(data_dir, 'config.ini')
     reader = tdr.Trajectory_Data_Reader(config_filename = config_path)
     keeper = tdr.Trajectory_QSR_Keeper(objects=objects, \
                         trajectories=trajectory_poses, reader=reader)
-    #keeper.save(base_data_dir)
-    #tr = keeper.reader.spatial_relations[uuid].trace
+    #keeper.save(data_dir)
+    tr = keeper.reader.spatial_relations[uuid].trace
     #for i in tr:
     #    print tr[i].qsrs['Printer (photocopier)_5,trajectory'].qsr
+    #print tr
+
+    """3.5 Check the uuid is new"""
+    stitching.merge_qsr_worlds(uuid, keeper.reader)
+    print "Length of qsr world = ", len(keeper.reader.spatial_relations[uuid].trace)
+
 
     """4. Episodes"""
     ep = tdr.Episodes(reader=keeper.reader)
@@ -80,7 +132,6 @@ def handle_novelty_detection(req):
     for t in ep.all_episodes:
         for o in ep.all_episodes[t]:
             print ep.all_episodes[t][o]
-
 
     """4. Activity Graph"""
     params = (None, 1, 3, 4)
@@ -99,8 +150,8 @@ def handle_novelty_detection(req):
     print "\n  MODELS LOADED :"
     file_ = os.path.join(data_dir + 'learning/roi_' + roi + '_smartThing.p')
     smartThing=la.Learning(load_from_file=file_)
-    print smartThing.methods
-    print smartThing.code_book
+    #print smartThing.methods
+    print "code book = ", smartThing.code_book
     #print "\n  GRAPHLET: \n", smartThing.graphlet_book[0].graph
     
     """6. Create Feature Vector""" 
@@ -133,24 +184,29 @@ def handle_novelty_detection(req):
 
     """9. ROI Knowledge"""
     knowledge = smartThing.methods['roi_knowledge'][roi]
-    print "Knowledge of region = ", knowledge
+    print "Region/Time Knowledge = ", knowledge
     t = datetime.fromtimestamp(start_time)
     th = knowledge[t.hour]
+    print "knowledge score = ", th
 
-    print "Service took: ", time.time()-t0, "  secs."
+    print "\n Service took: ", time.time()-t0, "  secs."
     return NoveltyDetectionResponse(dst, [pc, pf], th)
 
 
 def calculate_novelty():
+    
     rospy.init_node('novelty_server')
 
+    #print stitching.uuid
+
                         #service_name       #serive_type       #handler_function
-    s = rospy.Service('/novelty_detection', NoveltyDetection, handle_novelty_detection)  
+    s = rospy.Service('/novelty_detection', NoveltyDetection, handle_novelty_detection)
     print "Ready to detect novelty..."
     rospy.spin()
 
 
 
 if __name__ == "__main__":
+    stitching = stitch_uuids()
     calculate_novelty()
 

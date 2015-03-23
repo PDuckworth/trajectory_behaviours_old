@@ -212,7 +212,7 @@ class Activity_Graph():
         #for window in self.graphlet_hash_cnts.keys():    #If using multiple windows
         window = self.graphlet_hash_cnts.keys()[0]
 
-        histogram = [0] * len(code_book)
+        histogram = [0.0] * len(code_book)
         for bin_pos in range(len(code_book)):
             if code_book[bin_pos] in self.graphlet_hash_cnts[window]:
                 histogram[bin_pos] += self.graphlet_hash_cnts[window][code_book[bin_pos]]
@@ -635,10 +635,9 @@ if __name__  == '__main__':
     print tag
 
     episodes_file = 'd6c54902-3259-5ff4-b1ca-9ed5132df53d__1__101'
-    ep = Episodes(load_from_file="all_episodes.p", dir=base_data_dir)
+    ep = Episodes(load_from_file="roi_12_episodes.p", dir=base_data_dir)
     ep2 = ep.all_episodes[episodes_file]
     episodes      = list(itertools.chain.from_iterable(ep2.values()))
-
 
     activity_graph = Activity_Graph(episodes, params)
     activity_graph.get_valid_graphlets()

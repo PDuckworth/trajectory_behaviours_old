@@ -12,7 +12,6 @@ import math
 import cPickle as pickle
 import numpy as np
 import matplotlib.pyplot as plt
-from relational_learner.Activity_Graph import Activity_Graph
 
 from sklearn import metrics
 from sklearn.cluster import KMeans
@@ -23,6 +22,7 @@ from sklearn.preprocessing import StandardScaler
 from soma_geospatial_store.geospatial_store import *
 from tf.transformations import euler_from_quaternion
 
+from relational_learner.Activity_Graph import Activity_Graph
 from time_analysis.cyclic_processes import *
 
 class Learning():
@@ -62,15 +62,19 @@ class Learning():
 
     
     def load(self, filename):
-        print("Loading QSRs from", filename)
-        with open(filename, "rb") as f:
-            foo = pickle.load(f)
+        print("Loading Learning from", filename)
+        try:
+            with open(filename, "rb") as f:
+                foo = pickle.load(f)
+        except:
+            print "Loading of learnt model failed. Cannot test novelty)."
+
         self.roi = foo["ROI"]
         self.methods = foo["learning_methods"]
         self.code_book = foo["code_book"]
         self.graphlet_book = foo["graphlet_book"]
         self.feature_space = foo["feature_space"]
-        print "Loaded: " + repr(self.methods)
+        print "Loaded: " + repr(self.methods.keys())
         print("success")
 
 
@@ -273,4 +277,16 @@ def plot_pca(data, k):
     plt.yticks(())  
     plt.show()
 
+
+
+if __name__ == "__main__":
+    rospy.init_node('learningArea')
+
+    data_dir = '/home/strands/STRANDS/'
+    file_ = os.path.join(data_dir + 'learning/roi_12_smartThing.p')
+    print file_
+
+    smartThing=Learning(load_from_file=file_)
+    print smartThing.methods
+    print smartThing.code_book
 

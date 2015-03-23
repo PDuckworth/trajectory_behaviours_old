@@ -5,6 +5,7 @@ import rospy
 from relational_learner.srv import *
 import relational_learner.obtain_trajectories as ot
 from human_trajectory.msg import Trajectories
+
 import card_check.card_check_client as ccc
 import card_checking.msg
 
@@ -31,6 +32,7 @@ class NoveltyClient(object):
             self.uuid = msg.trajectories[0].uuid
             self.pose = msg.trajectories[0].trajectory[-1].pose
             self.ret = self.novelty_client(msg.trajectories[0])
+
 
 if __name__ == "__main__":
     rospy.init_node('novelty_client')
