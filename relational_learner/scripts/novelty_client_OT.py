@@ -3,7 +3,11 @@
 import sys
 import rospy
 from relational_learner.srv import *
+#from relational_learner.msg import *
 import relational_learner.obtain_trajectories as ot
+from human_trajectory.msg import Trajectories
+from std_msgs.msg import String
+
 
 class NoveltyClient(object):
 
@@ -11,6 +15,9 @@ class NoveltyClient(object):
         self.ret = None
         self.uuid = ''
         self.pose = None
+        
+        self.pub = rospy.Publisher("/trajectory_behaviours/novel_trajectory", String, queue_size=10)
+        rospy.Subscriber("/human_trajectories/trajectories/batch", Trajectories, self.callback)
 
     def novelty_client(self, Trajectory):
         rospy.wait_for_service('/novelty_detection')
@@ -19,10 +26,6 @@ class NoveltyClient(object):
         ret = proxy(req)
         return ret
 
-    def listener(self):
-        rospy.Subscriber("/human_trajectories/trajectories/batch", Trajectories, self.callback)
-        rospy.sleep(0.1)
-
     def callback(self, msg):
         if len(msg.trajectories) > 0:
             self.uuid = msg.trajectories[0].uuid
@@ -30,43 +33,81 @@ class NoveltyClient(object):
             self.ret = self.novelty_client(msg.trajectories[0])
 
 
+class NoveltyScoreLogic(object):
+    def __init__(self):
+        self.spatial_scores = {}
+    
+    def add(self, uuid, spatial_dist):
+        self.spatial_scores[uuid] = spatial_dist
 
 
+    def mean(self):
+        """Return the sample arithmetic mean of data."""
+        n = len(self.spatial_scores.values())
+        if n < 1:
+            raise ValueError('mean requires at least one data point')
+        return sum(self.spatial_scores.values())/float(n)
 
+    def _ss(self):
+        """Return sum of square deviations of sequence data."""
+        c = self.mean()
+        ss = sum((x-c)**2 for x in self.spatial_scores.values())
+        return ss
 
+    def pstdev(self):
+        """Calculates the population standard deviation."""
+        n = len(self.spatial_scores.values())
+        if n < 2:
+            raise ValueError('variance requires at least two data points')
+        ss = self._ss()
+        pvar = ss/n # the population variance
+        return pvar**0.5
 
 if __name__ == "__main__":
     rospy.init_node('novelty_client')
-    """
-    # Stitch together mini-batch trajectory msg if the uuid matches.
-    # Stitch using the .seq 
 
-    """
+    nsl = NoveltyScoreLogic()
     nc = NoveltyClient()
 
-   
-    """Obtain one trajectory from mongodb
-       Pass it to novelty_client as a test case!
+    ### Query all ROI 12 to test (or just one dude) ###
+    #query = '''{"uuid": "328e2f8c-6147-5525-93c4-1b281887623b"}''' 
+    query ='''{"loc": { "$geoWithin": { "$geometry":
+        { "type" : "Polygon", "coordinates" : [ [ 
+                    [ -0.0002246355582968818, 
+                      -2.519034444503632e-05],
+                    [ -0.0002241486476179944, 
+                     -7.42736662147081e-05], 
+                    [ -0.000258645873657315, 
+                      -7.284014769481928e-05],
+                    [ -0.0002555339747090102, 
+                      -2.521782172948406e-05],
+                    [ -0.0002246355582968818, 
+                      -2.519034444503632e-05]
+                    ] ] }}}}'''
 
-       This comes from geo_store and hence is in long/lat! 
-    """
-    query = '''{"uuid": "328e2f8c-6147-5525-93c4-1b281887623b"}''' ## ROI 12
+
+
+
     q = ot.query_trajectories(query)
-    mimic_trajectory_msg = q.res.trajectories.trajectories[0]
 
-    print query
-
-    ret = nc.novelty_client(mimic_trajectory_msg)
+    test = [q.res.trajectories.trajectories[0]]#, q.res.trajectories.trajectories[0]]
     
-    print ret
+    #for i in q.res.trajectories.trajectories:
+    for i in test:
+        ret = nc.novelty_client(i)
+        print ret
+        nsl.add(i.uuid, ret.spatial_dist)
+        print nsl.spatial_scores
 
-    """
-    # Publish nt.ret on "all_novelty" topic
-    # A novelty_decision node, to Listen to ret, and run some logic to decide which to approach
-    # Publish this decision on "super_novel" topic
-    # Jay then calls CardCheckClient (not me :)
-    """
+        values = nsl.spatial_scores.values()
+        nc.pub.publish(i.uuid)
+  
+        print "mean of collection: ", nsl.mean()
+        print "sum of square deviations: ", nsl._ss()
+        if len(values)>1: print "population std dev: ",  nsl.pstdev()
+        #rospy.sleep(2)
     
+
 
     #rospy.spin()
 

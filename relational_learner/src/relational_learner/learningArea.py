@@ -12,6 +12,7 @@ import math
 import cPickle as pickle
 import numpy as np
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 
 from sklearn import metrics
 from sklearn.cluster import KMeans
@@ -141,7 +142,8 @@ class Learning():
 
          
 
-    def time_analysis(self, timestamps_vec, interval=1800):
+    def time_analysis(self, time_points, interval=1800):
+        timestamps_vec = time_wrap(time_points)[0]
 
         dyn_cl = dynamic_clusters()
         for t in range(len(timestamps_vec)):
@@ -161,6 +163,8 @@ class Learning():
 
         gs = GeoSpatialStoreProxy('geospatial_store','soma')
         ns = GeoSpatialStoreProxy('message_store','monitored_nav_events')
+        ms = GeoSpatialStoreProxy('message_store','soma_roi')
+
         twoproxies = TwoProxies(gs, ns, map, config)
 
         query = {"_id": {"$exists": "true"}}     
@@ -187,26 +191,26 @@ class Learning():
                     self.roi_knowledge[i['soma_roi_id']]=1
                     self.roi_temp_list[i['soma_roi_id']]=[timepoint]
 
-        
-        for roi in self.roi_temp_list:
-            view_ts, ind = time_wrap(self.roi_temp_list[roi])
-            t = binning(view_ts, n_bins, interval)
-            self.roi_temp_know[roi] = [float(k)/max(t) for k in t]
-            #print self.roi_temp_know[roi]
 
+        for roi in self.roi_temp_list:
+            a = ms.area_of_roi(str(roi), map, config)
+            view_ts, ind = time_wrap(self.roi_temp_list[roi])
+            binned_timepoints = binning(view_ts, n_bins, interval)
+
+            self.roi_temp_know[roi] = [b/a for b in binned_timepoints[:-1]]
+
+        print "Knowledge of Regions takes: ", time.time()-t0, "  secs."
+        self.knowledge_plot(n_bins)
         self.methods["roi_knowledge"] = self.roi_knowledge
         self.methods["roi_knowledge"] = self.roi_temp_know
 
-        print "Knowledge of Regions takes: ", time.time()-t0, "  secs."
+        
 
     
     def time_plot(timestamps_vec, knowledge, interval=3600, period=86400, \
                         vis=False):
         pc = []
         pf = []
-        print timestamps_vec
-        print type(timestamps_vec)
-
         for v in timestamps_vec:
             pc.append(self.methods["time_dyn_clst"].query_clusters(v))
             pf.append(self.methods["time_fitting"].query_model(v))
@@ -220,6 +224,28 @@ class Learning():
         plt.savefig('/home/strands/STRANDS/learning/roi12.jpg', \
                 bbox_inches='tight', dpi=100)
 
+
+
+    def knowledge_plot(self, n_bins):
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        z = 0
+        cl = ['r', 'g', 'b', 'y']
+        regions=[]
+        for (roi, k) in self.roi_temp_know.items():
+            print k
+            regions.append(roi)
+            cls = [cl[z%4]]*n_bins
+            ax.bar(range(n_bins),k, zs=z, zdir='y', color=cls, alpha = 0.8)
+            z = z+1
+        ax.set_ylabel("ROI")
+        ax.set_xlabel("time")
+        ax.set_zlabel("observation (secs)/area (m^2)")
+        ax.set_xticks([0,3,6,9,12,15,18,21,24])
+        ax.set_yticks(range(1,len(regions)+1))
+        ax.set_yticklabels(regions)
+        plt.savefig('/home/strands/STRANDS/learning/roi_knowledge.jpg', \
+                bbox_inches='tight', dpi=100)
 
     
 def robot_view_cone( Px, Py, yaw):

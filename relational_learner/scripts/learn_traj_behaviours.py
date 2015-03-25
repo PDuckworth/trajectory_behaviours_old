@@ -91,7 +91,7 @@ def run_all():
     #*******************************************************************#
     #             Obtain ROI, Objects and Trajectories                  #
     #*******************************************************************#
-    __out = True
+    __out = False
     roi_timepoints = {}
     roi_cnt = 0
     two_proxies = TwoProxies(gs, msg, soma_map, soma_config)
@@ -111,7 +111,7 @@ def run_all():
 	
         query = '''{"loc": { "$geoWithin": { "$geometry": 
         { "type" : "Polygon", "coordinates" : %s }}}}''' %geom['coordinates']
-        print query
+        if __out: print query
         #query = '''{"loc": { "$geoIntersects": { "$geometry": 
         #{ "type" : "Polygon", "coordinates" : %s }}}}''' %geom['coordinates']
         q = ot.query_trajectories(query)
@@ -226,10 +226,10 @@ def run_all():
         #smartThing.time_plot(q.trajectory_times, roi_knowledge[roi], vis=True)
         
         smartThing.save(learning_area)
-
+        print "Learnt models for: "
         for key in smartThing.methods:
-            print "\nLearnt: ", key
-            print smartThing.methods[key]
+            print "    ", key
+            #print smartThing.methods[key]
   
         roi_cnt+=1
 

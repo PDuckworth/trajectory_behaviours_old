@@ -30,6 +30,7 @@ class stitch_uuids(object):
            with the same UUID. Merge after QSRs have been generated."""
         #If new UUID        
         if self.uuid != uuid:
+            print "NEW ID"
             self.uuid = uuid
             #Initial QSRs of tractories:
             self.stored_qsrs = data_reader.spatial_relations[uuid].trace
@@ -37,7 +38,7 @@ class stitch_uuids(object):
             return data_reader
         #If same as previous UUID
         else:
-            print "QSRs Stitched together"
+            print "NOTE: QSRs stitched together"
             #print "NEW = ", reader.spatial_relations[uuid].trace
             #print "STORED = ", self.stored_qsrs
             len_of_stored = len(self.stored_qsrs)
@@ -60,8 +61,6 @@ def get_poses(trajectory_message):
     return traj
 
 def handle_novelty_detection(req):
-    print stitching.uuid
-
     """     1. Take the trajectory as input
             2. Query mongodb for the region and objects
             3. Pass to strands to QSRLib data parser
@@ -95,9 +94,9 @@ def handle_novelty_detection(req):
     uuid = req.trajectory.uuid
     start_time = req.trajectory.start_time.secs
     print "1. Analysing trajectory: %s" %uuid
+
     trajectory_poses = {uuid : get_poses(req.trajectory)}
     print "LENGTH of Trajectory: ", len(trajectory_poses[uuid])
-
 
     """2. Region and Objects"""  
     gs = GeoSpatialStoreProxy('geospatial_store', 'soma')
@@ -109,24 +108,22 @@ def handle_novelty_detection(req):
     print "\n  ROI: ", roi
     print "\n  Objects: ", objects
 
-
     """3. QSRLib data parser"""
-    reader = tdr.Trajectory_Data_Reader(config_filename = config_path)
-    keeper = tdr.Trajectory_QSR_Keeper(objects=objects, \
-                        trajectories=trajectory_poses, reader=reader)
-    #keeper.save(data_dir)
-    tr = keeper.reader.spatial_relations[uuid].trace
+    qsr_reader = tdr.Trajectory_Data_Reader(objects=objects, \
+                                        trajectories=trajectory_poses, \
+                                        config_filename=config_path, \
+                                        roi=roi)
+
+    tr = qsr_reader.spatial_relations[uuid].trace
     #for i in tr:
     #    print tr[i].qsrs['Printer (photocopier)_5,trajectory'].qsr
     #print tr
 
     """3.5 Check the uuid is new"""
-    stitching.merge_qsr_worlds(uuid, keeper.reader)
-    print "Length of qsr world = ", len(keeper.reader.spatial_relations[uuid].trace)
-
+    stitching.merge_qsr_worlds(uuid, qsr_reader)
 
     """4. Episodes"""
-    ep = tdr.Episodes(reader=keeper.reader)
+    ep = tdr.Episodes(reader=qsr_reader)
     ep.get_episodes(noise_thres=3)
     print "\n  ALL EPISODES :"
     for t in ep.all_episodes:
